@@ -1,0 +1,31 @@
+# Database configuration (contains credentials - do not commit)
+db.php
+api/db.php
+
+# Composer
+api/vendor/
+
+# Uploads and user-generated content
+uploads/*
+!uploads/.gitkeep
+
+# Environment / local overrides
+.env
+.env.local
+*.local.php
+
+# OS and editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.idea/
+.vscode/
+*.sublime-*
+
+# Logs
+*.log
+logs/
