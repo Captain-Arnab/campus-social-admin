@@ -27,6 +27,7 @@ if (!$event) {
 $banners = json_decode($event['banners'] ?? '[]');
 $is_pending = ($event['status'] == 'pending');
 $is_hold = ($event['status'] == 'hold');
+$is_past_event = (strtotime($event['event_date']) < time());
 
 $volunteers = $conn->query("
     SELECT v.id as vol_link_id, v.role, v.status as vol_status, u.full_name, u.email, u.phone, u.id as user_id
@@ -45,6 +46,37 @@ $participants = $conn->query("
 
 // Fetch status change log
 $status_log = $conn->query("SELECT * FROM event_status_log WHERE event_id = $id ORDER BY changed_at DESC LIMIT 5");
+
+// Event editors (table may not exist until migration is run)
+$event_editors = [];
+$ed_res = @$conn->query("SELECT ee.user_id, u.full_name, u.email FROM event_editors ee JOIN users u ON ee.user_id = u.id WHERE ee.event_id = $id");
+if ($ed_res) {
+    while ($r = $ed_res->fetch_assoc()) { $event_editors[] = $r; }
+}
+
+// Event winners (table may not exist until migration is run)
+$event_winners = [];
+$win_res = @$conn->query("SELECT w.user_id, w.position, u.full_name FROM event_winners w JOIN users u ON w.user_id = u.id WHERE w.event_id = $id ORDER BY w.position ASC");
+if ($win_res) {
+    while ($r = $win_res->fetch_assoc()) { $event_winners[] = $r; }
+}
+
+// Certificates per user for this event (for display in tables)
+$certificates = [];
+$cert_res = @$conn->query("SELECT user_id, type, file_path FROM event_certificates WHERE event_id = $id");
+if ($cert_res) {
+    while ($r = $cert_res->fetch_assoc()) {
+        $key = $r['user_id'] . '_' . $r['type'];
+        $certificates[$key] = $r['file_path'];
+    }
+}
+
+// Pending edit from organizer/editor (when event has editors, edits require admin approval)
+$pending_edit = null;
+$pending_edit_res = @$conn->query("SELECT p.*, u.full_name as submitted_by_name FROM event_pending_edits p JOIN users u ON p.submitted_by_user_id = u.id WHERE p.event_id = $id");
+if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
+    $pending_edit = $pending_edit_res->fetch_assoc();
+}
 ?>
 
 <!DOCTYPE html>
@@ -227,22 +259,42 @@ $status_log = $conn->query("SELECT * FROM event_status_log WHERE event_id = $id 
                                             <th>Student Name</th>
                                             <th>Assigned Role</th>
                                             <th>Status</th>
+                                            <th>E-Certificate</th>
                                             <th class="text-end">Action</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         <?php if($volunteers->num_rows > 0): ?>
-                                            <?php while($vol = $volunteers->fetch_assoc()): ?>
+                                            <?php 
+                                            $volunteers->data_seek(0);
+                                            while($vol = $volunteers->fetch_assoc()): 
+                                                $cert_key = $vol['user_id'] . '_volunteer';
+                                                $has_cert = isset($certificates[$cert_key]);
+                                            ?>
                                             <tr>
                                                 <td>
-                                                    <div class="fw-bold text-dark"><?php echo $vol['full_name']; ?></div>
-                                                    <small class="text-muted"><?php echo $vol['email']; ?></small>
+                                                    <div class="fw-bold text-dark"><?php echo htmlspecialchars($vol['full_name']); ?></div>
+                                                    <small class="text-muted"><?php echo htmlspecialchars($vol['email']); ?></small>
                                                 </td>
-                                                <td><span class="text-primary fw-semibold"><?php echo $vol['role']; ?></span></td>
+                                                <td><span class="text-primary fw-semibold"><?php echo htmlspecialchars($vol['role']); ?></span></td>
                                                 <td>
                                                     <span class="vol-badge bg-<?php echo $vol['vol_status'] == 'active' ? 'success' : 'danger'; ?> bg-opacity-10 text-<?php echo $vol['vol_status'] == 'active' ? 'success' : 'danger'; ?>">
                                                         <?php echo strtoupper($vol['vol_status']); ?>
                                                     </span>
+                                                </td>
+                                                <td>
+                                                    <?php if ($is_past_event): ?>
+                                                        <?php if ($has_cert): ?>
+                                                            <a href="<?php echo htmlspecialchars($certificates[$cert_key]); ?>" target="_blank" class="btn btn-sm btn-outline-success"><i class="fas fa-certificate me-1"></i>View</a>
+                                                        <?php endif; ?>
+                                                        <label class="btn btn-sm btn-outline-primary mb-0 <?php echo $has_cert ? 'ms-1' : ''; ?>">
+                                                            <i class="fas fa-upload me-1"></i><?php echo $has_cert ? 'Replace' : 'Upload'; ?>
+                                                            <input type="file" accept=".pdf,image/jpeg,image/png,image/gif,image/webp" hidden onchange="uploadCertificate(<?php echo (int)$vol['user_id']; ?>, 'volunteer', this)">
+                                                        </label>
+                                                        <small class="d-block text-muted" style="font-size: 0.65rem;">PDF/Image, max 5MB</small>
+                                                    <?php else: ?>
+                                                        <span class="text-muted small">Available after event ends</span>
+                                                    <?php endif; ?>
                                                 </td>
                                                 <td class="text-end">
                                                     <a href="manage_user.php?id=<?php echo $vol['vol_link_id']; ?>&action=<?php echo $vol['vol_status'] == 'active' ? 'block' : 'unblock'; ?>&type=volunteer" 
@@ -254,7 +306,7 @@ $status_log = $conn->query("SELECT * FROM event_status_log WHERE event_id = $id 
                                             </tr>
                                             <?php endwhile; ?>
                                         <?php else: ?>
-                                            <tr><td colspan="4" class="text-center py-4 text-muted">No volunteers have joined yet.</td></tr>
+                                            <tr><td colspan="5" class="text-center py-4 text-muted">No volunteers have joined yet.</td></tr>
                                         <?php endif; ?>
                                     </tbody>
                                 </table>
@@ -270,22 +322,60 @@ $status_log = $conn->query("SELECT * FROM event_status_log WHERE event_id = $id 
                                             <th>Student Name</th>
                                             <th>Contact</th>
                                             <th>Status</th>
+                                            <th>E-Certificate</th>
+                                            <th>Winner</th>
                                             <th class="text-end">Action</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <?php if($participants->num_rows > 0): ?>
-                                            <?php while($part = $participants->fetch_assoc()): ?>
+                                        <?php 
+                                        $winner_user_ids = array_column($event_winners, 'user_id');
+                                        if($participants->num_rows > 0): ?>
+                                            <?php while($part = $participants->fetch_assoc()): 
+                                                $cert_key = $part['user_id'] . '_participant';
+                                                $has_cert = isset($certificates[$cert_key]);
+                                                $is_winner = in_array((int)$part['user_id'], $winner_user_ids);
+                                            ?>
                                             <tr>
                                                 <td>
-                                                    <div class="fw-bold text-dark"><?php echo $part['full_name']; ?></div>
-                                                    <small class="text-muted"><?php echo $part['email']; ?></small>
+                                                    <div class="fw-bold text-dark"><?php echo htmlspecialchars($part['full_name']); ?></div>
+                                                    <small class="text-muted"><?php echo htmlspecialchars($part['email']); ?></small>
                                                 </td>
-                                                <td><small class="text-muted"><?php echo $part['phone']; ?></small></td>
+                                                <td><small class="text-muted"><?php echo htmlspecialchars($part['phone']); ?></small></td>
                                                 <td>
                                                     <span class="vol-badge bg-<?php echo $part['participant_status'] == 'active' ? 'success' : 'danger'; ?> bg-opacity-10 text-<?php echo $part['participant_status'] == 'active' ? 'success' : 'danger'; ?>">
                                                         <?php echo strtoupper($part['participant_status']); ?>
                                                     </span>
+                                                </td>
+                                                <td>
+                                                    <?php if ($is_past_event): ?>
+                                                        <?php if ($has_cert): ?>
+                                                            <a href="<?php echo htmlspecialchars($certificates[$cert_key]); ?>" target="_blank" class="btn btn-sm btn-outline-success"><i class="fas fa-certificate me-1"></i>View</a>
+                                                        <?php endif; ?>
+                                                        <label class="btn btn-sm btn-outline-primary mb-0 <?php echo $has_cert ? 'ms-1' : ''; ?>">
+                                                            <i class="fas fa-upload me-1"></i><?php echo $has_cert ? 'Replace' : 'Upload'; ?>
+                                                            <input type="file" accept=".pdf,image/jpeg,image/png,image/gif,image/webp" hidden onchange="uploadCertificate(<?php echo (int)$part['user_id']; ?>, 'participant', this)">
+                                                        </label>
+                                                        <small class="d-block text-muted" style="font-size: 0.65rem;">PDF/Image, max 5MB</small>
+                                                    <?php else: ?>
+                                                        <span class="text-muted small">Available after event ends</span>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td>
+                                                    <?php if ($is_past_event): ?>
+                                                        <?php if ($is_winner): 
+                                                            $winner_pos = array_search((int)$part['user_id'], array_column($event_winners, 'user_id'));
+                                                            $pos = $winner_pos !== false && isset($event_winners[$winner_pos]) ? (int)$event_winners[$winner_pos]['position'] : 0;
+                                                            $posLabel = $pos === 1 ? '1st' : ($pos === 2 ? '2nd' : ($pos === 3 ? '3rd' : $pos . 'th'));
+                                                        ?>
+                                                            <span class="badge bg-warning text-dark me-1"><i class="fas fa-trophy"></i> <?php echo $posLabel; ?> winner</span>
+                                                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="setWinner(<?php echo (int)$part['user_id']; ?>, '<?php echo htmlspecialchars(addslashes($part['full_name'])); ?>', true, this)">Remove</button>
+                                                        <?php else: ?>
+                                                            <button type="button" class="btn btn-sm btn-outline-warning" onclick="setWinner(<?php echo (int)$part['user_id']; ?>, '<?php echo htmlspecialchars(addslashes($part['full_name'])); ?>', false, this)"><i class="fas fa-trophy me-1"></i>Set as winner</button>
+                                                        <?php endif; ?>
+                                                    <?php else: ?>
+                                                        <span class="text-muted small">Available after event ends</span>
+                                                    <?php endif; ?>
                                                 </td>
                                                 <td class="text-end">
                                                     <a href="manage_user.php?id=<?php echo $part['participant_link_id']; ?>&action=<?php echo $part['participant_status'] == 'active' ? 'block' : 'unblock'; ?>&type=participant" 
@@ -297,7 +387,7 @@ $status_log = $conn->query("SELECT * FROM event_status_log WHERE event_id = $id 
                                             </tr>
                                             <?php endwhile; ?>
                                         <?php else: ?>
-                                            <tr><td colspan="4" class="text-center py-4 text-muted">No participants have registered yet.</td></tr>
+                                            <tr><td colspan="6" class="text-center py-4 text-muted">No participants have registered yet.</td></tr>
                                         <?php endif; ?>
                                     </tbody>
                                 </table>
@@ -314,6 +404,20 @@ $status_log = $conn->query("SELECT * FROM event_status_log WHERE event_id = $id 
                     <a href="edit_event.php?id=<?php echo $id; ?>" class="btn-action-main" style="background: #2d3436; color: white; text-decoration: none; display: inline-block; text-align:center;">
                         <i class="fas fa-pen-to-square me-2"></i>EDIT EVENT DETAILS
                     </a>
+                    <button type="button" class="btn-action-main w-100 mt-2" style="background: #6c5ce7; color: white; border: none;" onclick="openAddEditorsModal()">
+                        <i class="fas fa-user-plus me-2"></i>ADD EDITORS
+                    </button>
+                    <div id="editorsList" class="mt-2 small">
+                        <?php foreach ($event_editors as $ed): ?>
+                        <div class="d-flex align-items-center justify-content-between py-1 px-2 rounded mb-1" style="background: var(--brand-soft);">
+                            <span class="fw-semibold"><?php echo htmlspecialchars($ed['full_name']); ?></span>
+                            <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1" onclick="removeEditor(<?php echo (int)$ed['user_id']; ?>, this)" title="Remove editor"><i class="fas fa-times"></i></button>
+                        </div>
+                        <?php endforeach; ?>
+                        <?php if (empty($event_editors)): ?>
+                        <p class="text-muted mb-0 small">No additional editors.</p>
+                        <?php endif; ?>
+                    </div>
                     
                     <?php if ($is_pending): ?>
                         <!-- Pending Event Management -->
@@ -387,6 +491,39 @@ $status_log = $conn->query("SELECT * FROM event_status_log WHERE event_id = $id 
                     <?php endif; ?>
                 </div>
 
+                <!-- Pending edit from organizer/editor (requires admin approval) -->
+                <?php if ($pending_edit): ?>
+                <div class="compact-card p-4 border-warning border-2">
+                    <h6 class="fw-bold text-warning mb-3"><i class="fas fa-clock me-2"></i> Pending edit (awaiting your approval)</h6>
+                    <p class="small text-muted mb-2">Submitted by: <strong><?php echo htmlspecialchars($pending_edit['submitted_by_name']); ?></strong></p>
+                    <div class="small mb-2"><strong>Title:</strong> <?php echo htmlspecialchars($pending_edit['title']); ?></div>
+                    <?php if (!empty($pending_edit['description'])): ?><div class="small mb-2"><strong>Description:</strong> <?php echo nl2br(htmlspecialchars($pending_edit['description'])); ?></div><?php endif; ?>
+                    <div class="small mb-2"><strong>Venue:</strong> <?php echo htmlspecialchars($pending_edit['venue']); ?></div>
+                    <?php if (!empty($pending_edit['event_date'])): ?><div class="small mb-2"><strong>Event date:</strong> <?php echo date('M d, Y h:i A', strtotime($pending_edit['event_date'])); ?></div><?php endif; ?>
+                    <?php if (!empty($pending_edit['category'])): ?><div class="small mb-3"><strong>Category:</strong> <?php echo htmlspecialchars($pending_edit['category']); ?></div><?php endif; ?>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-success btn-sm" onclick="approveOrRejectEdit('approve')"><i class="fas fa-check me-1"></i>Approve edit</button>
+                        <button type="button" class="btn btn-outline-danger btn-sm" onclick="approveOrRejectEdit('reject')"><i class="fas fa-times me-1"></i>Reject</button>
+                    </div>
+                </div>
+                <?php endif; ?>
+
+                <!-- Event Winners -->
+                <?php if (!empty($event_winners)): ?>
+                <div class="compact-card p-4">
+                    <h6 class="fw-bold small text-muted text-uppercase mb-3"><i class="fas fa-trophy text-warning me-1"></i> Event Winners</h6>
+                    <?php foreach ($event_winners as $w): 
+                        $pos = (int)$w['position'];
+                        $posLabel = $pos === 1 ? '1st' : ($pos === 2 ? '2nd' : ($pos === 3 ? '3rd' : $pos . 'th'));
+                    ?>
+                    <div class="d-flex align-items-center mb-2">
+                        <span class="badge bg-warning text-dark me-2"><?php echo $posLabel; ?></span>
+                        <span class="fw-semibold"><?php echo htmlspecialchars($w['full_name']); ?></span>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <?php endif; ?>
+
                 <!-- Organizer Info -->
                 <div class="compact-card p-4">
                     <h6 class="fw-bold small text-muted text-uppercase mb-3">Organizer Insight</h6>
@@ -424,9 +561,45 @@ $status_log = $conn->query("SELECT * FROM event_status_log WHERE event_id = $id 
         </div>
     </div>
 
+    <!-- Add Editors Modal -->
+    <div class="modal fade" id="addEditorsModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add Editors</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-muted">Search by name or email. Event creator is not listed.</p>
+                    <input type="text" id="editorSearch" class="form-control mb-3" placeholder="Search by name or email..." autocomplete="off">
+                    <div id="editorSearchResults" class="list-group list-group-flush"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>
+        (function showMsgAlert() {
+            const params = new URLSearchParams(window.location.search);
+            const msg = params.get('msg');
+            const messages = {
+                edit_approved: { title: 'Edit approved', text: 'Event edit has been approved and applied.', icon: 'success' },
+                edit_rejected: { title: 'Edit rejected', text: 'Event edit has been rejected.', icon: 'info' },
+                edit_failed: { title: 'Error', text: 'Could not apply edit.', icon: 'error' },
+                no_pending: { title: 'No pending edit', text: 'There is no pending edit for this event.', icon: 'info' },
+                updated: { title: 'Event updated', text: 'Event details have been saved.', icon: 'success' },
+                blocked: { title: 'Blocked', text: 'User has been blocked.', icon: 'success' },
+                unblocked: { title: 'Unblocked', text: 'User has been unblocked.', icon: 'success' }
+            };
+            if (msg && messages[msg]) {
+                Swal.fire(messages[msg].title, messages[msg].text, messages[msg].icon).then(() => {
+                    window.history.replaceState({}, '', window.location.pathname + '?id=<?php echo (int)$id; ?>');
+                });
+            }
+        })();
+
         const checks = document.querySelectorAll('.verify-check');
         const approveBtn = document.getElementById('approveBtn');
 
@@ -448,7 +621,32 @@ $status_log = $conn->query("SELECT * FROM event_status_log WHERE event_id = $id 
         }
 
         function processAction(action) {
-            window.location.href = `approve.php?id=<?php echo $id; ?>&action=${action}`;
+            const labels = { approve: 'Approve this event', reject: 'Reject this event' };
+            const text = labels[action] || 'Continue?';
+            Swal.fire({
+                title: 'Confirm',
+                text: text,
+                icon: action === 'reject' ? 'warning' : 'question',
+                showCancelButton: true,
+                confirmButtonColor: action === 'reject' ? '#e74c3c' : '#2ecc71',
+                cancelButtonColor: '#95a5a6'
+            }).then((res) => {
+                if (res.isConfirmed) window.location.href = `approve.php?id=<?php echo $id; ?>&action=${action}`;
+            });
+        }
+
+        function approveOrRejectEdit(action) {
+            const isApprove = action === 'approve';
+            Swal.fire({
+                title: isApprove ? 'Approve edit?' : 'Reject edit?',
+                text: isApprove ? 'Event details will be updated with the submitted changes.' : 'The pending edit will be discarded.',
+                icon: isApprove ? 'question' : 'warning',
+                showCancelButton: true,
+                confirmButtonColor: isApprove ? '#2ecc71' : '#e74c3c',
+                cancelButtonColor: '#95a5a6'
+            }).then((res) => {
+                if (res.isConfirmed) window.location.href = `approve_event_edit.php?id=<?php echo $id; ?>&action=${action}`;
+            });
         }
 
         function showHoldModal() {
@@ -520,6 +718,133 @@ $status_log = $conn->query("SELECT * FROM event_status_log WHERE event_id = $id 
                 if (result.isConfirmed) {
                     const data = result.value;
                     window.location.href = `approve.php?id=<?php echo $id; ?>&action=reschedule&new_date=${encodeURIComponent(data.newDate)}&reason=${encodeURIComponent(data.reason)}`;
+                }
+            });
+        }
+
+        const eventId = <?php echo (int)$id; ?>;
+
+        function openAddEditorsModal() {
+            const modal = new bootstrap.Modal(document.getElementById('addEditorsModal'));
+            modal.show();
+            document.getElementById('editorSearch').value = '';
+            fetchEditorUsers('');
+        }
+
+        let editorSearchTimer;
+        document.getElementById('editorSearch').addEventListener('input', function() {
+            clearTimeout(editorSearchTimer);
+            editorSearchTimer = setTimeout(() => fetchEditorUsers(this.value), 300);
+        });
+
+        function fetchEditorUsers(search) {
+            const url = `get_users_for_editors.php?event_id=${eventId}&search=${encodeURIComponent(search)}`;
+            fetch(url).then(r => r.json()).then(data => {
+                const el = document.getElementById('editorSearchResults');
+                el.innerHTML = '';
+                if (data.status !== 'success' || !data.data.length) {
+                    el.innerHTML = '<div class="text-muted small py-2">No users found.</div>';
+                    return;
+                }
+                data.data.forEach(u => {
+                    const item = document.createElement('button');
+                    item.type = 'button';
+                    item.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
+                    item.innerHTML = `<div><strong>${escapeHtml(u.full_name)}</strong><br><small class="text-muted">${escapeHtml(u.email)}</small></div><span class="badge bg-primary">Add</span>`;
+                    item.onclick = () => addEditor(u.id, u.full_name, item);
+                    el.appendChild(item);
+                });
+            });
+        }
+
+        function escapeHtml(s) {
+            const div = document.createElement('div');
+            div.textContent = s;
+            return div.innerHTML;
+        }
+
+        function addEditor(userId, fullName, btnRow) {
+            const fd = new FormData();
+            fd.append('event_id', eventId);
+            fd.append('user_id', userId);
+            fd.append('action', 'add');
+            fetch('event_editors_action.php', { method: 'POST', body: fd }).then(r => r.json()).then(data => {
+                if (data.status === 'success') {
+                    const list = document.getElementById('editorsList');
+                    const p = list.querySelector('p.text-muted');
+                    if (p) p.remove();
+                    const div = document.createElement('div');
+                    div.className = 'd-flex align-items-center justify-content-between py-1 px-2 rounded mb-1';
+                    div.style.background = 'var(--brand-soft)';
+                    div.innerHTML = `<span class="fw-semibold">${escapeHtml(fullName)}</span><button type="button" class="btn btn-sm btn-outline-danger py-0 px-1" onclick="removeEditor(${userId}, this)" title="Remove editor"><i class="fas fa-times"></i></button>`;
+                    list.insertBefore(div, list.firstChild);
+                    const btn = btnRow.closest('button');
+                    if (btn) { btn.disabled = true; const b = btn.querySelector('.badge'); if (b) b.textContent = 'Added'; }
+                    Swal.fire('Editor added', escapeHtml(fullName) + ' has been added as an editor.', 'success');
+                } else {
+                    Swal.fire('Error', data.message || 'Failed', 'error');
+                }
+            });
+        }
+
+        function removeEditor(userId, btn) {
+            const fd = new FormData();
+            fd.append('event_id', eventId);
+            fd.append('user_id', userId);
+            fd.append('action', 'remove');
+            fetch('event_editors_action.php', { method: 'POST', body: fd }).then(r => r.json()).then(data => {
+                if (data.status === 'success') {
+                    btn.closest('.d-flex').remove();
+                    const list = document.getElementById('editorsList');
+                    if (!list.querySelector('.d-flex')) {
+                        const p = document.createElement('p');
+                        p.className = 'text-muted mb-0 small';
+                        p.textContent = 'No additional editors.';
+                        list.appendChild(p);
+                    }
+                    Swal.fire('Editor removed', 'The user has been removed from editors.', 'success');
+                } else {
+                    Swal.fire('Error', data.message || 'Failed', 'error');
+                }
+            });
+        }
+
+        function uploadCertificate(userId, type, input) {
+            if (!input.files || !input.files[0]) return;
+            const file = input.files[0];
+            if (file.size > 5 * 1024 * 1024) {
+                Swal.fire('Error', 'File must be 5 MB or less.', 'error');
+                return;
+            }
+            const fd = new FormData();
+            fd.append('event_id', eventId);
+            fd.append('user_id', userId);
+            fd.append('type', type);
+            fd.append('certificate', file);
+            fetch('upload_certificate.php', { method: 'POST', body: fd }).then(r => r.json()).then(data => {
+                if (data.status === 'success') {
+                    Swal.fire('Done', 'Certificate uploaded.', 'success').then(() => location.reload());
+                } else {
+                    Swal.fire('Error', data.message || 'Upload failed', 'error');
+                }
+            });
+        }
+
+        function setWinner(userId, fullName, isWinner, btn) {
+            const fd = new FormData();
+            fd.append('event_id', eventId);
+            fd.append('user_id', userId);
+            fd.append('action', isWinner ? 'remove' : 'add');
+            fetch('event_winners_action.php', { method: 'POST', body: fd }).then(r => r.json()).then(data => {
+                if (data.status === 'success') {
+                    if (isWinner) {
+                        Swal.fire('Winner removed', fullName + ' has been removed from winners.', 'success').then(() => location.reload());
+                    } else {
+                        const posLabel = data.position_label || (data.position === 1 ? '1st' : (data.position === 2 ? '2nd' : (data.position === 3 ? '3rd' : data.position + 'th')));
+                        Swal.fire('Winner selected', fullName + ' has been set as ' + posLabel + ' winner.', 'success').then(() => location.reload());
+                    }
+                } else {
+                    Swal.fire('Error', data.message || 'Failed', 'error');
                 }
             });
         }

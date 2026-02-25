@@ -157,14 +157,41 @@ if ($method == 'GET') {
             $event_id = $row['id'];
             
             // Get volunteer list
-            $vol_res = $conn->query("SELECT u.full_name as student_name, v.role FROM volunteers v JOIN users u ON v.user_id = u.id WHERE v.event_id = $event_id AND v.status = 'active'");
+            $vol_res = $conn->query("SELECT u.full_name as student_name, v.role, v.user_id FROM volunteers v JOIN users u ON v.user_id = u.id WHERE v.event_id = $event_id AND v.status = 'active'");
             $row['volunteer_list'] = [];
             while($v = $vol_res->fetch_assoc()) { $row['volunteer_list'][] = $v; }
             
             // Get participant list
-            $part_res = $conn->query("SELECT u.full_name as student_name FROM participant p JOIN users u ON p.user_id = u.id WHERE p.event_id = $event_id AND p.status = 'active'");
+            $part_res = $conn->query("SELECT u.full_name as student_name, p.user_id FROM participant p JOIN users u ON p.user_id = u.id WHERE p.event_id = $event_id AND p.status = 'active'");
             $row['participant_list'] = [];
             while($p = $part_res->fetch_assoc()) { $row['participant_list'][] = $p; }
+            
+            // Event editors (for app: who can edit)
+            $row['editor_ids'] = [];
+            $ed_res = @$conn->query("SELECT user_id FROM event_editors WHERE event_id = $event_id");
+            if ($ed_res) {
+                while ($ed = $ed_res->fetch_assoc()) { $row['editor_ids'][] = (int) $ed['user_id']; }
+            }
+            
+            // Event winners (from participants)
+            $row['winners'] = [];
+            $win_res = @$conn->query("SELECT w.user_id, w.position, u.full_name FROM event_winners w JOIN users u ON w.user_id = u.id WHERE w.event_id = $event_id ORDER BY w.position ASC");
+            if ($win_res) {
+                while ($w = $win_res->fetch_assoc()) {
+                    $row['winners'][] = ['user_id' => (int) $w['user_id'], 'full_name' => $w['full_name'], 'position' => (int) $w['position']];
+                }
+            }
+            // Pending edit (when event has editors, organizer/editor edits await admin approval)
+            $row['pending_edit'] = null;
+            $pe_cols = "title, description, venue, event_date, category, submitted_by_user_id, submitted_at";
+            $has_banners = @$conn->query("SHOW COLUMNS FROM event_pending_edits LIKE 'banners'");
+            if ($has_banners && $has_banners->num_rows > 0) {
+                $pe_cols .= ", banners";
+            }
+            $pe_res = @$conn->query("SELECT $pe_cols FROM event_pending_edits WHERE event_id = $event_id LIMIT 1");
+            if ($pe_res && $pe_res->num_rows > 0) {
+                $row['pending_edit'] = $pe_res->fetch_assoc();
+            }
         }
         $data[] = $row;
     }
@@ -176,8 +203,119 @@ if ($method == 'GET') {
     }
 }
 
-// --- 2. CREATE EVENT (POST) ---
+// --- 2. CREATE EVENT (POST) or UPDATE EVENT (POST action=update with multipart/form-data) ---
 elseif ($method == 'POST') {
+    $is_update = isset($_POST['action']) && $_POST['action'] === 'update' && isset($_POST['event_id']) && isset($_POST['user_id']);
+
+    if ($is_update) {
+        // --- UPDATE EVENT (same fields as create: title, description, event_date, category, venue, optional banners) ---
+        $id = intval($_POST['event_id']);
+        $user_id = intval($_POST['user_id']);
+        $check = $conn->prepare("SELECT id, organizer_id, status, title, description, venue, event_date, category, banners FROM events WHERE id = ?");
+        $check->bind_param("i", $id);
+        $check->execute();
+        $evt = $check->get_result()->fetch_assoc();
+        $check->close();
+        if (!$evt) {
+            echo json_encode(["status" => "error", "message" => "Event not found"]);
+            exit();
+        }
+        $is_organizer = ((int) $evt['organizer_id']) === $user_id;
+        $is_editor = false;
+        $ed = $conn->prepare("SELECT 1 FROM event_editors WHERE event_id = ? AND user_id = ? LIMIT 1");
+        if ($ed) {
+            $ed->bind_param("ii", $id, $user_id);
+            $ed->execute();
+            $ed->store_result();
+            $is_editor = ($ed->num_rows > 0);
+            $ed->close();
+        }
+        if (!$is_organizer && !$is_editor) {
+            http_response_code(403);
+            echo json_encode(["status" => "error", "message" => "Only organizer or an editor can update this event"]);
+            exit();
+        }
+        $title = isset($_POST['title']) ? $conn->real_escape_string($_POST['title']) : $evt['title'];
+        $desc = isset($_POST['description']) ? $conn->real_escape_string($_POST['description']) : $evt['description'];
+        $venue = isset($_POST['venue']) ? $conn->real_escape_string($_POST['venue']) : $evt['venue'];
+        $event_date_raw = isset($_POST['event_date']) && $_POST['event_date'] !== '' ? $_POST['event_date'] : null;
+        if ($event_date_raw !== null) {
+            $event_date_raw = str_replace('T', ' ', $event_date_raw);
+            if (strlen($event_date_raw) === 16) {
+                $event_date_raw .= ':00';
+            }
+        }
+        $event_date = $event_date_raw !== null ? $conn->real_escape_string($event_date_raw) : $evt['event_date'];
+        $category = isset($_POST['category']) ? $conn->real_escape_string($_POST['category']) : $evt['category'];
+        $image_paths = [];
+        if (isset($_FILES['banners']) && !empty($_FILES['banners']['tmp_name'][0])) {
+            if (!is_dir('../uploads/events/')) {
+                mkdir('../uploads/events/', 0777, true);
+            }
+            foreach ($_FILES['banners']['tmp_name'] as $key => $tmp_name) {
+                if ($_FILES['banners']['error'][$key] === UPLOAD_ERR_OK) {
+                    $filename = "evt_" . time() . "_" . $key . "_" . basename($_FILES['banners']['name'][$key]);
+                    if (move_uploaded_file($tmp_name, "../uploads/events/" . $filename)) {
+                        $image_paths[] = $filename;
+                    }
+                }
+            }
+        }
+        $banners_json = !empty($image_paths) ? json_encode($image_paths) : $evt['banners'];
+
+        $event_has_editors = false;
+        $ed_count = @$conn->query("SELECT 1 FROM event_editors WHERE event_id = $id LIMIT 1");
+        if ($ed_count && $ed_count->num_rows > 0) {
+            $event_has_editors = true;
+        }
+        $needs_approval = ($event_has_editors && $evt['status'] === 'approved');
+
+        if ($needs_approval) {
+            $has_banners_col = @$conn->query("SHOW COLUMNS FROM event_pending_edits LIKE 'banners'");
+            $has_banners_col = $has_banners_col && $has_banners_col->num_rows > 0;
+            if ($has_banners_col) {
+                $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, category, banners, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), category=VALUES(category), banners=VALUES(banners), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
+                if ($stmt) {
+                    $stmt->bind_param("issssssi", $id, $title, $desc, $venue, $event_date, $category, $banners_json, $user_id);
+                    if ($stmt->execute()) {
+                        $stmt->close();
+                        echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
+                    } else {
+                        $stmt->close();
+                        echo json_encode(["status" => "error", "message" => $conn->error]);
+                    }
+                    exit();
+                }
+            }
+            $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, category, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), category=VALUES(category), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
+            if ($stmt) {
+                $stmt->bind_param("isssssi", $id, $title, $desc, $venue, $event_date, $category, $user_id);
+                if ($stmt->execute()) {
+                    $stmt->close();
+                    echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
+                } else {
+                    $stmt->close();
+                    echo json_encode(["status" => "error", "message" => $conn->error]);
+                }
+                exit();
+            }
+        }
+        $banners_esc = $conn->real_escape_string($banners_json);
+        $event_date_esc = $conn->real_escape_string($event_date);
+        $title_esc = $conn->real_escape_string($title);
+        $desc_esc = $conn->real_escape_string($desc);
+        $venue_esc = $conn->real_escape_string($venue);
+        $category_esc = $conn->real_escape_string($category);
+        $sql = "UPDATE events SET title='$title_esc', description='$desc_esc', venue='$venue_esc', event_date='$event_date_esc', category='$category_esc', banners='$banners_esc' WHERE id=$id";
+        if ($conn->query($sql)) {
+            echo json_encode(["status" => "success", "message" => "Event updated"]);
+        } else {
+            echo json_encode(["status" => "error", "message" => $conn->error]);
+        }
+        exit();
+    }
+
+    // --- CREATE EVENT ---
     if (!isset($_POST['title']) || !isset($_POST['user_id'])) {
         echo json_encode(["status" => "error", "message" => "Event-er proyojonio details dewa hoyni"]);
         exit();
@@ -191,12 +329,10 @@ elseif ($method == 'POST') {
     $organizer_id = intval($_POST['user_id']);
 
     $image_paths = [];
-    // Banner Upload korata OPTIONAL
     if (isset($_FILES['banners']) && !empty($_FILES['banners']['tmp_name'][0])) {
         if (!is_dir('../uploads/events/')) {
             mkdir('../uploads/events/', 0777, true);
         }
-
         foreach ($_FILES['banners']['tmp_name'] as $key => $tmp_name) {
             if ($_FILES['banners']['error'][$key] === UPLOAD_ERR_OK) {
                 $filename = "evt_" . time() . "_" . $key . "_" . basename($_FILES['banners']['name'][$key]);
@@ -206,7 +342,6 @@ elseif ($method == 'POST') {
             }
         }
     }
-    
     $banners_json = json_encode($image_paths);
 
     $sql = "INSERT INTO events (title, description, event_date, category, venue, status, organizer_id, banners) 
@@ -219,22 +354,107 @@ elseif ($method == 'POST') {
     }
 }
 
-// --- 3. UPDATE EVENT (PUT) ---
+// --- 3. UPDATE EVENT (PUT) - JSON body: same fields as create (title, description, event_date, category, venue) ---
 elseif ($method == 'PUT') {
-    // Note: PUT usually takes JSON body
+    // Organizer or event editor. If event has editors and is approved, edit goes to pending (admin approval required).
     $data = json_decode(file_get_contents("php://input"), true);
     
-    if (!isset($data['id'])) {
-        echo json_encode(["status" => "error", "message" => "Event ID required"]);
+    if (!isset($data['id']) || !isset($data['user_id'])) {
+        echo json_encode(["status" => "error", "message" => "Event ID and user_id required"]);
         exit();
     }
 
     $id = intval($data['id']);
-    $title = $conn->real_escape_string($data['title']);
-    $desc = $conn->real_escape_string($data['description'] ?? '');
-    $venue = $conn->real_escape_string($data['venue'] ?? '');
+    $user_id = intval($data['user_id']);
     
-    $sql = "UPDATE events SET title='$title', description='$desc', venue='$venue' WHERE id=$id";
+    $check = $conn->prepare("SELECT id, organizer_id, status, title, description, venue, event_date, category, banners FROM events WHERE id = ?");
+    $check->bind_param("i", $id);
+    $check->execute();
+    $evt = $check->get_result()->fetch_assoc();
+    $check->close();
+    if (!$evt) {
+        echo json_encode(["status" => "error", "message" => "Event not found"]);
+        exit();
+    }
+    $is_organizer = ((int) $evt['organizer_id']) === $user_id;
+    $is_editor = false;
+    $ed = $conn->prepare("SELECT 1 FROM event_editors WHERE event_id = ? AND user_id = ? LIMIT 1");
+    if ($ed) {
+        $ed->bind_param("ii", $id, $user_id);
+        $ed->execute();
+        $ed->store_result();
+        $is_editor = ($ed->num_rows > 0);
+        $ed->close();
+    }
+    if (!$is_organizer && !$is_editor) {
+        http_response_code(403);
+        echo json_encode(["status" => "error", "message" => "Only organizer or an editor can update this event"]);
+        exit();
+    }
+
+    // Merge with current: use provided values or keep existing (same as create-event form fields)
+    $title = array_key_exists('title', $data) ? $conn->real_escape_string($data['title']) : $evt['title'];
+    $desc = array_key_exists('description', $data) ? $conn->real_escape_string($data['description']) : $evt['description'];
+    $venue = array_key_exists('venue', $data) ? $conn->real_escape_string($data['venue']) : $evt['venue'];
+    $event_date_raw = array_key_exists('event_date', $data) && $data['event_date'] !== '' && $data['event_date'] !== null ? $data['event_date'] : null;
+    if ($event_date_raw !== null) {
+        $event_date_raw = str_replace('T', ' ', $event_date_raw);
+        if (strlen($event_date_raw) === 16) {
+            $event_date_raw .= ':00';
+        }
+    }
+    $event_date = $event_date_raw !== null ? $conn->real_escape_string($event_date_raw) : $evt['event_date'];
+    $category = array_key_exists('category', $data) ? $conn->real_escape_string($data['category']) : $evt['category'];
+    // Banners in PUT: optional JSON array of filenames (client can replace with new list; no file upload in PUT)
+    $banners_json = $evt['banners'];
+    if (array_key_exists('banners', $data) && is_array($data['banners'])) {
+        $banners_json = json_encode(array_map(function ($f) use ($conn) { return $conn->real_escape_string($f); }, $data['banners']));
+    }
+
+    $event_has_editors = false;
+    $ed_count = @$conn->query("SELECT 1 FROM event_editors WHERE event_id = $id LIMIT 1");
+    if ($ed_count && $ed_count->num_rows > 0) {
+        $event_has_editors = true;
+    }
+    $needs_approval = ($event_has_editors && $evt['status'] === 'approved');
+
+    if ($needs_approval) {
+        // Save to pending_edits; admin will approve or reject
+        $has_banners_col = @$conn->query("SHOW COLUMNS FROM event_pending_edits LIKE 'banners'");
+        $has_banners_col = $has_banners_col && $has_banners_col->num_rows > 0;
+        if ($has_banners_col) {
+            $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, category, banners, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), category=VALUES(category), banners=VALUES(banners), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
+            if ($stmt) {
+                $stmt->bind_param("issssssi", $id, $title, $desc, $venue, $event_date, $category, $banners_json, $user_id);
+                if ($stmt->execute()) {
+                    $stmt->close();
+                    echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
+                } else {
+                    $stmt->close();
+                    echo json_encode(["status" => "error", "message" => $conn->error]);
+                }
+                exit();
+            }
+        }
+        $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, category, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), category=VALUES(category), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
+        if (!$stmt) {
+            echo json_encode(["status" => "error", "message" => "Database error"]);
+            exit();
+        }
+        $stmt->bind_param("isssssi", $id, $title, $desc, $venue, $event_date, $category, $user_id);
+        if ($stmt->execute()) {
+            $stmt->close();
+            echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
+        } else {
+            $stmt->close();
+            echo json_encode(["status" => "error", "message" => $conn->error]);
+        }
+        exit();
+    }
+    
+    $banners_esc = $conn->real_escape_string($banners_json);
+    $event_date_esc = $conn->real_escape_string($event_date);
+    $sql = "UPDATE events SET title='$title', description='$desc', venue='$venue', event_date='$event_date_esc', category='$category', banners='$banners_esc' WHERE id=$id";
 
     if ($conn->query($sql)) {
         echo json_encode(["status" => "success", "message" => "Event updated"]);

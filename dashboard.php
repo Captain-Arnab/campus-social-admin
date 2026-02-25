@@ -207,5 +207,25 @@ $hold_requests = $conn->query("
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script>
+        (function showMsgAlert() {
+            const params = new URLSearchParams(window.location.search);
+            const msg = params.get('msg');
+            const messages = {
+                approve: { title: 'Event approved', text: 'The event has been approved and is now live.', icon: 'success' },
+                reject: { title: 'Event rejected', text: 'The event has been rejected.', icon: 'info' },
+                hold: { title: 'Event on hold', text: 'The event has been put on hold.', icon: 'warning' },
+                reschedule: { title: 'Event rescheduled', text: 'The event has been rescheduled.', icon: 'success' },
+                error: { title: 'Error', text: 'Something went wrong. Please try again.', icon: 'error' },
+                welcome: { title: 'Welcome', text: 'You are logged in successfully.', icon: 'success' }
+            };
+            if (msg && messages[msg]) {
+                Swal.fire(messages[msg].title, messages[msg].text, messages[msg].icon).then(() => {
+                    window.history.replaceState({}, '', 'dashboard.php');
+                });
+            }
+        })();
+    </script>
 </body>
 </html>

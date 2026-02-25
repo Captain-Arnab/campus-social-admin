@@ -345,6 +345,22 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script>
+        (function showMsgAlert() {
+            const params = new URLSearchParams(window.location.search);
+            const msg = params.get('msg');
+            if (msg === 'blocked') {
+                Swal.fire('User blocked', 'The user has been blocked.', 'success').then(() => {
+                    params.delete('msg');
+                    window.history.replaceState({}, '', 'users.php' + (params.toString() ? '?' + params.toString() : ''));
+                });
+            } else if (msg === 'unblocked') {
+                Swal.fire('User unblocked', 'The user has been unblocked.', 'success').then(() => {
+                    params.delete('msg');
+                    window.history.replaceState({}, '', 'users.php' + (params.toString() ? '?' + params.toString() : ''));
+                });
+            }
+        })();
+
         const currentView = '<?php echo $view; ?>';
         const fp = flatpickr("#dateInput", { mode: "range", dateFormat: "Y-m-d" });
         const nameIn = document.getElementById('nameInput');

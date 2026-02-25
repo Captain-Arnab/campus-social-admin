@@ -62,6 +62,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($upd->execute() && $upd->affected_rows >= 0) {
             $upd->close();
+            // Clear any pending edit from organizer/editor when admin edits directly
+            @$conn->query("DELETE FROM event_pending_edits WHERE event_id = $id");
 
             // Log the update (status stays the same)
             $remarks = "Event details updated by " . $user_type . " (" . $username . ")";
@@ -200,6 +202,17 @@ $banners = json_decode($event['banners'] ?? '[]');
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <?php if (!empty($errors)): ?>
+    <script>
+        Swal.fire({
+            title: 'Please fix the following',
+            html: '<ul class="text-start mb-0"><?php foreach ($errors as $e): ?><li><?php echo addslashes(htmlspecialchars($e)); ?></li><?php endforeach; ?></ul>',
+            icon: 'error',
+            confirmButtonColor: '#FF5F15'
+        });
+    </script>
+    <?php endif; ?>
 </body>
 </html>
 
