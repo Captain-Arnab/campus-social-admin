@@ -113,6 +113,3 @@ admin/
 - Keep `db.php` and `api/db.php` out of version control (they are in `.gitignore`).
 - In production, use HTTPS and secure session settings.
 
-## License
-
-Proprietary — VGS Campus Social project.
