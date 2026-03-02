@@ -10,6 +10,7 @@ Admin panel for **Campus Social** (College Connect), a college event management 
 - **User management** — View and manage registered users; user profiles
 - **Reports** — Download event/attendance reports
 - **API** — REST-style endpoints for the main app (events, users, volunteers, OTP, etc.)
+- **Push notifications** — Firebase Cloud Messaging (FCM); organizers can send meeting updates to volunteers and participants
 
 ## Requirements
 
@@ -71,7 +72,31 @@ composer install
 
 Ensure the `uploads/` directory exists and is writable by the web server if the app stores event images or other files there.
 
-### 6. Default login
+### 6. Push notifications (Firebase FCM)
+
+To enable organizer-to-volunteer/participant push notifications:
+
+1. **Run the notification migrations** (after the main DB schema is imported):
+   ```bash
+   mysql -u root -p college_event_db < api/migrations/add_notification_tables.sql
+   mysql -u root -p college_event_db < api/migrations/add_celebration_days.sql
+   ```
+   The second migration adds the **Celebration Days** table (21 occasions for 2026 and 2027: New Year, Republic Day, Holi, Diwali, etc.) used for notification dates in the app.
+
+2. **Create a Firebase project** (e.g. micampus-app) and add an Android app with package `in.co.micampus.app`. The Android app uses `google-services.json` for FCM.
+
+3. **Server key for sending from API:** In [Firebase Console](https://console.firebase.google.com) → Project Settings → Service accounts → **Generate new private key**. Save the JSON file as `api/firebase-service-account.json` (this file is in `.gitignore` — do not commit it). The API uses this to send push notifications when organizers send messages.
+
+4. **Optional:** To override project ID or path, create `api/firebase_config.local.php` and set `$firebase_project_id` and/or `$firebase_service_account_path`.
+
+**Notification API endpoints:**
+
+- **POST `api/register_fcm_token.php`** — Android app registers the device FCM token after user login. Body: `{"user_id": 1, "fcm_token": "...", "device_id": "optional"}`.
+- **GET `api/notification_dates.php`** — Returns list of notification dates. Query: `?from=YYYY-MM-DD` (optional `&to=YYYY-MM-DD`, `&include_events=1`, `&include_celebrations=1` to include Celebration Days).
+- **GET `api/celebration_dates.php`** — Returns Celebration Days only (2026/2027). Query: `?from=YYYY-MM-DD` (optional `&to=YYYY-MM-DD`, `&year=2026`).
+- **POST `api/send_event_notification.php`** — Organizer sends a text message to volunteers and/or participants. Body: `{"event_id": 1, "organizer_id": 1, "message": "Meeting at 3 PM tomorrow", "recipient_type": "volunteers"|"participants"|"both"}`. Only the event organizer can call this.
+
+### 7. Default login
 
 After importing `college_event_db.sql`, you can log in as:
 
@@ -82,9 +107,17 @@ After importing `college_event_db.sql`, you can log in as:
 
 ```
 admin/
-├── api/                 # API endpoints (events, users, OTP, etc.)
+├── api/                 # API endpoints (events, users, OTP, notifications, etc.)
 │   ├── db.php           # DB config for API (create locally, in .gitignore)
 │   ├── composer.json    # PHP dependencies (e.g. PHPMailer)
+│   ├── firebase_config.php   # FCM project ID and service account path
+│   ├── fcm_helper.php       # FCM v1 send helper (no Composer deps)
+│   ├── register_fcm_token.php
+│   ├── notification_dates.php
+│   ├── send_event_notification.php
+│   ├── celebration_dates.php
+│   ├── migrations/add_notification_tables.sql
+│   ├── migrations/add_celebration_days.sql
 │   └── ...
 ├── assets/              # CSS, JS, images for admin UI
 ├── uploads/             # User-uploaded files (e.g. event images)

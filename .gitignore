@@ -2,6 +2,10 @@
 db.php
 api/db.php
 
+# Firebase service account key (do not commit)
+api/firebase-service-account.json
+api/firebase_config.local.php
+
 # Composer
 api/vendor/
 
