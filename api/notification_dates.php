@@ -20,12 +20,11 @@ try {
 
     $method = $_SERVER['REQUEST_METHOD'];
 
-    // GET — return list of notification dates (notification_dates, optional celebration_days, optional event dates)
+    // GET — return list of notification dates (from notification_dates table and optionally upcoming event dates)
     if ($method === 'GET') {
         $include_events = isset($_GET['include_events']) && $_GET['include_events'] !== '0';
-        $include_celebrations = isset($_GET['include_celebrations']) && $_GET['include_celebrations'] !== '0';
         $from = isset($_GET['from']) ? $conn->real_escape_string($_GET['from']) : date('Y-m-d');
-        $to = isset($_GET['to']) ? $conn->real_escape_string($_GET['to']) : null;
+        $to = isset($_GET['to']) ? $conn->real_escape_string($_GET['to']) : null; // no limit by default
 
         $dates = [];
 
@@ -65,46 +64,6 @@ try {
             $stmt->close();
         }
 
-        // Optionally include Celebration Days (e.g. New Year, Republic Day, Diwali — 2026/2027)
-        if ($include_celebrations) {
-            $celebrations_check = $conn->query("SHOW TABLES LIKE 'celebration_days'");
-            if ($celebrations_check && $celebrations_check->num_rows > 0) {
-                $c_sql = "SELECT id, occasion_name, occasion_date, is_fixed, is_tentative FROM celebration_days WHERE occasion_date >= ?";
-                $c_params = [$from];
-                $c_types = "s";
-                if ($to) {
-                    $c_sql .= " AND occasion_date <= ?";
-                    $c_params[] = $to;
-                    $c_types .= "s";
-                }
-                $c_sql .= " ORDER BY occasion_date ASC";
-                $c_stmt = $conn->prepare($c_sql);
-                if ($c_stmt) {
-                    if ($to) {
-                        $c_stmt->bind_param("ss", $from, $to);
-                    } else {
-                        $c_stmt->bind_param("s", $from);
-                    }
-                    $c_stmt->execute();
-                    $c_res = $c_stmt->get_result();
-                    while ($c_row = $c_res->fetch_assoc()) {
-                        $dates[] = [
-                            'id' => 'c' . $c_row['id'],
-                            'event_id' => null,
-                            'notify_date' => $c_row['occasion_date'],
-                            'title' => $c_row['occasion_name'],
-                            'message' => $c_row['occasion_name'],
-                            'event_title' => null,
-                            'source' => 'celebration',
-                            'is_fixed' => (bool) $c_row['is_fixed'],
-                            'is_tentative' => (bool) $c_row['is_tentative']
-                        ];
-                    }
-                    $c_stmt->close();
-                }
-            }
-        }
-
         // Optionally include upcoming event dates as notification dates
         if ($include_events) {
             $events_sql = "SELECT id, title, event_date, venue FROM events WHERE status = 'approved' AND DATE(event_date) >= ? ORDER BY event_date ASC LIMIT 100";
@@ -126,11 +85,11 @@ try {
                 }
                 $estmt->close();
             }
+            // Sort by notify_date
+            usort($dates, function ($a, $b) {
+                return strcmp($a['notify_date'], $b['notify_date']);
+            });
         }
-
-        usort($dates, function ($a, $b) {
-            return strcmp($a['notify_date'], $b['notify_date']);
-        });
 
         echo json_encode(["status" => "success", "count" => count($dates), "data" => $dates]);
         exit();

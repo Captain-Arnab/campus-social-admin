@@ -18,7 +18,9 @@ if (isset($_GET['ajax_filter'])) {
     $filter_sql = "";
     
     $date_condition = "";
-    if ($view == 'past') {
+    if ($view == 'pending') {
+        $date_condition = "AND e.status = 'pending'";
+    } elseif ($view == 'past') {
         $date_condition = "AND e.event_date < NOW() AND e.event_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
     } elseif ($view == 'archive') {
         $date_condition = "AND e.event_date < DATE_SUB(NOW(), INTERVAL 30 DAY)";
@@ -30,7 +32,7 @@ if (isset($_GET['ajax_filter'])) {
 
     if (!empty($search_query)) $filter_sql .= " AND (e.title LIKE '%$search_query%' OR u.full_name LIKE '%$search_query%')";
     if (!empty($category_filter)) $filter_sql .= " AND e.category = '$category_filter'";
-    if (!empty($date_filter) && $view != 'hold') {
+    if (!empty($date_filter) && $view != 'hold' && $view != 'pending') {
         $dates = explode(" to ", $date_filter);
         if(count($dates) == 2) {
             $filter_sql .= " AND DATE(e.event_date) BETWEEN '$dates[0]' AND '$dates[1]'";
@@ -39,11 +41,12 @@ if (isset($_GET['ajax_filter'])) {
         }
     }
 
+    $order_by = ($view == 'pending') ? "e.created_at DESC" : "e.event_date DESC";
     $sql = "SELECT e.*, u.full_name as organizer_name 
             FROM events e 
             JOIN users u ON e.organizer_id = u.id 
             WHERE 1=1 $date_condition $filter_sql 
-            ORDER BY e.event_date DESC";
+            ORDER BY $order_by";
             
     $events = $conn->query($sql);
 
@@ -109,7 +112,9 @@ if (isset($_GET['ajax_filter'])) {
 
 // Initial Load logic
 $date_condition = "";
-if ($view == 'past') {
+if ($view == 'pending') {
+    $date_condition = "AND e.status = 'pending'";
+} elseif ($view == 'past') {
     $date_condition = "AND e.event_date < NOW() AND e.event_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
 } elseif ($view == 'archive') {
     $date_condition = "AND e.event_date < DATE_SUB(NOW(), INTERVAL 30 DAY)";
@@ -119,7 +124,8 @@ if ($view == 'past') {
     $date_condition = "AND e.event_date >= NOW() AND e.status = 'approved'";
 }
 
-$sql = "SELECT e.*, u.full_name as organizer_name FROM events e JOIN users u ON e.organizer_id = u.id WHERE 1=1 $date_condition ORDER BY e.event_date DESC";
+$order_by = ($view == 'pending') ? "e.created_at DESC" : "e.event_date DESC";
+$sql = "SELECT e.*, u.full_name as organizer_name FROM events e JOIN users u ON e.organizer_id = u.id WHERE 1=1 $date_condition ORDER BY $order_by";
 $events = $conn->query($sql);
 $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY category ASC");
 ?>
@@ -252,6 +258,9 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
 
         <!-- View Navigation Tabs -->
         <div style="margin-bottom: 20px; border-bottom: 2px solid #f0f0f0; display: flex; gap: 10px; overflow-x: auto;">
+            <a href="events.php?view=pending" class="text-decoration-none <?php echo ($view == 'pending') ? 'fw-bold text-dark' : 'text-muted'; ?>" style="padding-bottom: 12px; border-bottom: <?php echo ($view == 'pending') ? '3px solid #e67e22' : 'none'; ?> ;">
+                <i class="fas fa-hourglass-half me-1"></i>Pending Approval
+            </a>
             <a href="events.php?view=live" class="text-decoration-none <?php echo ($view == 'live') ? 'fw-bold text-dark' : 'text-muted'; ?>" style="padding-bottom: 12px; border-bottom: <?php echo ($view == 'live') ? '3px solid #FF5F15' : 'none'; ?> ;">
                 <i class="fas fa-play-circle me-1"></i>Live Events
             </a>

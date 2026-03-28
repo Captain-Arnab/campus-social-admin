@@ -55,7 +55,10 @@ if ($conn->connect_error) {
 ?>
 ```
 
-**`api/db.php`** — Same structure as above; used by the API. Copy the same settings (or your API-specific DB user) into `api/db.php`.
+**`api/db.php`** — The API **must use the same database** as the admin panel. Otherwise events created from the app will not appear for approval or in the events list after approval.
+
+- **Recommended:** Copy `api/db.example.php` to `api/db.php`. The example uses the admin panel’s connection (`../db.php`) so one config covers both.
+- **Alternatively:** Create `api/db.php` with the same `$dbname` (and host/user/pass) as root `db.php`.
 
 > **Important:** Never commit `db.php` or `api/db.php` — they contain credentials and are listed in `.gitignore`.
 
@@ -138,6 +141,10 @@ admin/
 ├── .gitignore           # Ignores db.php, api/db.php, vendor, uploads, etc.
 └── README.md            # This file
 ```
+
+## Troubleshooting
+
+- **Events from the app don’t show for approval or in the events list** — The API and admin panel must use the same database. Use `api/db.example.php` (copy to `api/db.php`) so the API uses the admin `db.php`, or set the same `$dbname` in both configs.
 
 ## Security notes
 

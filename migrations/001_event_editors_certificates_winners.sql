@@ -54,7 +54,6 @@ CREATE TABLE IF NOT EXISTS `event_pending_edits` (
   `venue` varchar(255) NOT NULL,
   `event_date` datetime DEFAULT NULL,
   `category` varchar(50) DEFAULT NULL,
-  `banners` text DEFAULT NULL COMMENT 'JSON array of banner filenames',
   `submitted_by_user_id` int(11) NOT NULL,
   `submitted_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
@@ -62,6 +61,3 @@ CREATE TABLE IF NOT EXISTS `event_pending_edits` (
   CONSTRAINT `event_pending_edits_event_fk` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE,
   CONSTRAINT `event_pending_edits_user_fk` FOREIGN KEY (`submitted_by_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- If event_pending_edits already exists without banners column, run:
--- ALTER TABLE `event_pending_edits` ADD COLUMN `banners` TEXT DEFAULT NULL AFTER `category`;

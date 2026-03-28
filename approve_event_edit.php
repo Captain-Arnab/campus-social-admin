@@ -30,7 +30,6 @@ if ($action === 'approve') {
     $venue = $conn->real_escape_string($pending['venue']);
     $event_date = $pending['event_date'] ? $conn->real_escape_string($pending['event_date']) : null;
     $category = isset($pending['category']) && $pending['category'] !== '' ? $conn->real_escape_string($pending['category']) : null;
-    $banners = isset($pending['banners']) && $pending['banners'] !== '' && $pending['banners'] !== null ? $conn->real_escape_string($pending['banners']) : null;
 
     $stmt = $conn->prepare("UPDATE events SET title=?, description=?, venue=? WHERE id=?");
     $stmt->bind_param("sssi", $title, $desc, $venue, $id);
@@ -41,9 +40,6 @@ if ($action === 'approve') {
         }
         if ($category) {
             $conn->query("UPDATE events SET category='" . $conn->real_escape_string($category) . "' WHERE id=$id");
-        }
-        if ($banners !== null) {
-            $conn->query("UPDATE events SET banners='" . $banners . "' WHERE id=$id");
         }
         $conn->query("DELETE FROM event_pending_edits WHERE event_id = $id");
         $log_stmt = $conn->prepare("INSERT INTO event_status_log (event_id, admin_type, admin_username, old_status, new_status, remarks) VALUES (?, ?, ?, ?, ?, ?)");
