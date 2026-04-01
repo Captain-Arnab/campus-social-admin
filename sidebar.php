@@ -1,4 +1,7 @@
 <?php
+if (!function_exists('has_priv')) {
+    require_once __DIR__ . '/admin_priv.php';
+}
 // Get user type and name
 $user_type = $_SESSION['user_type'] ?? 'admin';
 $display_name = '';
@@ -274,13 +277,16 @@ if ($user_type == 'admin') {
     <div class="overflow-auto nav-scroll flex-grow-1" style="scrollbar-width: thin;">
         <ul class="nav nav-pills flex-column mb-auto pt-3">
             
+            <?php if (has_priv('dashboard')): ?>
             <div class="menu-header">Overview</div>
             <li class="nav-item">
                 <a href="dashboard.php" class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'dashboard.php' ? 'active' : ''; ?>">
                     <i class="fas fa-th-large"></i> Dashboard
                 </a>
             </li>
+            <?php endif; ?>
 
+            <?php if (has_priv('events')): ?>
             <div class="menu-header">Event Management</div>
             <li class="nav-item">
                 <a href="events.php?view=live" class="nav-link <?php echo (isset($_GET['view']) && $_GET['view'] == 'live') ? 'active' : ''; ?>">
@@ -297,14 +303,24 @@ if ($user_type == 'admin') {
                     <i class="fas fa-archive"></i> Archived (>30 Days)
                 </a>
             </li>
+            <?php endif; ?>
 
-            <?php if($user_type == 'admin'): ?>
+            <?php if (has_priv('manage_users') || is_main_admin()): ?>
             <div class="menu-header">User Administration</div>
+            <?php if (has_priv('manage_users')): ?>
             <li class="nav-item">
                 <a href="users.php" class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'users.php' ? 'active' : ''; ?>">
                     <i class="fas fa-users-cog"></i> Manage Users
                 </a>
             </li>
+            <?php endif; ?>
+            <?php if (is_main_admin()): ?>
+            <li class="nav-item">
+                <a href="manage_subadmins.php" class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'manage_subadmins.php' ? 'active' : ''; ?>">
+                    <i class="fas fa-user-shield"></i> Sub-admins
+                </a>
+            </li>
+            <?php endif; ?>
             <?php endif; ?>
         </ul>
     </div>

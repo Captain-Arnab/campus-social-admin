@@ -1,12 +1,13 @@
 <?php
 session_start();
 include 'db.php';
+require_once __DIR__ . '/admin_priv.php';
 
-// Check if user is logged in (admin or subadmin)
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     header("Location: index.php");
     exit();
 }
+require_priv('dashboard');
 
 $user_type = $_SESSION['user_type'] ?? 'admin';
 $username = isset($_SESSION['admin']) ? $_SESSION['admin'] : $_SESSION['subadmin'];
@@ -15,7 +16,11 @@ $username = isset($_SESSION['admin']) ? $_SESSION['admin'] : $_SESSION['subadmin
 $total_events = $conn->query("SELECT * FROM events")->num_rows;
 $pending_events = $conn->query("SELECT * FROM events WHERE status='pending'")->num_rows;
 $hold_events = $conn->query("SELECT * FROM events WHERE status='hold'")->num_rows;
-$live_events = $conn->query("SELECT * FROM events WHERE status='approved'")->num_rows;
+// Approved events that are upcoming (start in the future) or ongoing (started today — same calendar day)
+$active_events_sql = "SELECT COUNT(*) AS c FROM events WHERE status = 'approved'
+    AND (event_date >= NOW() OR (DATE(event_date) = CURDATE() AND event_date < NOW()))";
+$active_events_row = $conn->query($active_events_sql);
+$live_events = $active_events_row ? (int) $active_events_row->fetch_assoc()['c'] : 0;
 
 // Fetch Pending Events
 $pending_requests = $conn->query("
@@ -138,12 +143,16 @@ $hold_requests = $conn->query("
                             </div>
                         </div>
                         <div class="d-flex align-items-center gap-3">
+                            <?php if (has_priv('events')): ?>
                             <a href="event_details.php?id=<?php echo $row['id']; ?>" class="btn-review">
                                 <i class="fas fa-search-plus me-2"></i> Review & Verify
                             </a>
                             <a href="edit_event.php?id=<?php echo $row['id']; ?>" class="btn btn-outline-dark" style="border-radius: 12px; font-weight: 700; padding: 10px 16px;">
                                 <i class="fas fa-pen-to-square me-2"></i> Edit
                             </a>
+                            <?php elseif (has_priv('approve_events')): ?>
+                            <span class="text-muted small">Event details require the &quot;events&quot; privilege.</span>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
@@ -187,12 +196,16 @@ $hold_requests = $conn->query("
                             </div>
                         </div>
                         <div class="d-flex align-items-center gap-3">
+                            <?php if (has_priv('events')): ?>
                             <a href="event_details.php?id=<?php echo $row['id']; ?>" class="btn-review" style="background: #f39c12;">
                                 <i class="fas fa-edit me-2"></i> Manage Hold
                             </a>
                             <a href="edit_event.php?id=<?php echo $row['id']; ?>" class="btn btn-outline-dark" style="border-radius: 12px; font-weight: 700; padding: 10px 16px;">
                                 <i class="fas fa-pen-to-square me-2"></i> Edit
                             </a>
+                            <?php elseif (has_priv('approve_events')): ?>
+                            <span class="text-muted small">Event details require the &quot;events&quot; privilege.</span>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
@@ -212,6 +225,10 @@ $hold_requests = $conn->query("
         (function showMsgAlert() {
             const params = new URLSearchParams(window.location.search);
             const msg = params.get('msg');
+            if (params.get('forbidden') === '1') {
+                Swal.fire({ icon: 'warning', title: 'Access denied', text: 'You do not have permission for that action.', confirmButtonColor: '#FF5F15' });
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
             const messages = {
                 approve: { title: 'Event approved', text: 'The event has been approved and is now live.', icon: 'success' },
                 reject: { title: 'Event rejected', text: 'The event has been rejected.', icon: 'info' },

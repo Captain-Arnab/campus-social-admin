@@ -1,12 +1,13 @@
 <?php
 session_start();
 include 'db.php';
+require_once __DIR__ . '/admin_priv.php';
 
-// Check authentication
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     header("Location: index.php");
     exit();
 }
+require_priv('reports');
 
 // Determine if single or bulk download
 $event_ids = [];

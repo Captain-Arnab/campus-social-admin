@@ -16,19 +16,20 @@ try {
     $input = file_get_contents("php://input");
     $data = json_decode($input, true);
     
-    // Validate required parameters
-    $required = ['event_id', 'user_id'];
-    foreach ($required as $field) {
-        if (!isset($data[$field]) || empty($data[$field])) {
-            http_response_code(400);
-            echo json_encode(["status" => "error", "message" => "Missing parameter: $field"]);
-            exit();
-        }
+    if (!isset($data['event_id'], $data['user_id'], $data['department_class'])) {
+        http_response_code(400);
+        echo json_encode(["status" => "error", "message" => "event_id, user_id, and department_class are required"]);
+        exit();
     }
-    
-    // Sanitize inputs
+
     $event_id = intval($data['event_id']);
     $user_id = intval($data['user_id']);
+    $department_class = trim((string) $data['department_class']);
+    if ($event_id <= 0 || $user_id <= 0 || $department_class === '') {
+        http_response_code(400);
+        echo json_encode(["status" => "error", "message" => "Invalid event_id, user_id, or empty department_class"]);
+        exit();
+    }
     
     // Validate database connection
     if (!$conn) {
@@ -125,19 +126,23 @@ try {
     }
     
     $stmt->close();
-    
-    // Insert new participant record
-    $insert_query = "INSERT INTO participant (event_id, user_id, status) 
-                     VALUES (?, ?, 'active')";
+
+    // Sync department/class on profile (student_faculty)
+    $dept_esc = $conn->real_escape_string($department_class);
+    $conn->query("UPDATE student_faculty SET department_class = '$dept_esc' WHERE user_id = $user_id");
+
+    // Insert new participant record (stores dept at registration time)
+    $insert_query = "INSERT INTO participant (event_id, user_id, status, department_class) 
+                     VALUES (?, ?, 'active', ?)";
     $insert_stmt = $conn->prepare($insert_query);
-    
+
     if (!$insert_stmt) {
         http_response_code(500);
         echo json_encode(["status" => "error", "message" => "Database error: " . $conn->error]);
         exit();
     }
-    
-    $insert_stmt->bind_param("ii", $event_id, $user_id);
+
+    $insert_stmt->bind_param("iis", $event_id, $user_id, $department_class);
     
     if ($insert_stmt->execute()) {
         http_response_code(200);

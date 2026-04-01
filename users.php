@@ -1,11 +1,13 @@
 <?php
 session_start();
 include 'db.php';
+require_once __DIR__ . '/admin_priv.php';
 
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     header("Location: index.php");
     exit();
 }
+require_priv('manage_users');
 
 // Get view type (students or faculty)
 $view = isset($_GET['view']) ? $_GET['view'] : 'students';

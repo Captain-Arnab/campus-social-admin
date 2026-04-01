@@ -1,12 +1,13 @@
 <?php
 session_start();
 include 'db.php';
+require_once __DIR__ . '/admin_priv.php';
 
-// Check if user is logged in (admin or subadmin)
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     header("Location: index.php");
     exit();
 }
+require_priv('events');
 
 $user_type = $_SESSION['user_type'] ?? 'admin';
 $username = isset($_SESSION['admin']) ? $_SESSION['admin'] : $_SESSION['subadmin'];
@@ -36,6 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $venue = trim($_POST['venue'] ?? '');
     $event_date = trim($_POST['event_date'] ?? '');
     $description = trim($_POST['description'] ?? '');
+    $rules = trim($_POST['rules'] ?? '');
 
     if ($title === '') $errors[] = "Title is required";
     if ($category === '') $errors[] = "Category is required";
@@ -57,8 +59,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $old_status = $event['status'];
 
         // Admin can edit event details anytime (any status)
-        $upd = $conn->prepare("UPDATE events SET title = ?, category = ?, venue = ?, event_date = ?, description = ? WHERE id = ?");
-        $upd->bind_param("sssssi", $title, $category, $venue, $event_date_mysql, $description, $id);
+        $upd = $conn->prepare("UPDATE events SET title = ?, category = ?, venue = ?, event_date = ?, description = ?, rules = ? WHERE id = ?");
+        $upd->bind_param("ssssssi", $title, $category, $venue, $event_date_mysql, $description, $rules, $id);
 
         if ($upd->execute() && $upd->affected_rows >= 0) {
             $upd->close();
@@ -182,6 +184,10 @@ $banners = json_decode($event['banners'] ?? '[]');
                         <div class="col-12">
                             <label class="form-label fw-bold small">Description</label>
                             <textarea name="description" class="form-control" rows="5"><?php echo htmlspecialchars($_POST['description'] ?? $event['description']); ?></textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-bold small">Event rules</label>
+                            <textarea name="rules" class="form-control" rows="4" placeholder="Rules and guidelines for participants"><?php echo htmlspecialchars($_POST['rules'] ?? ($event['rules'] ?? '')); ?></textarea>
                         </div>
                     </div>
 

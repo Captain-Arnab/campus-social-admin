@@ -1,10 +1,14 @@
 <?php
 session_start();
 include 'db.php';
+require_once __DIR__ . '/admin_priv.php';
 
-// Check if user is logged in (admin or subadmin)
 if ((!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) || !isset($_GET['id'])) {
     header("Location: dashboard.php");
+    exit();
+}
+if (!has_priv('events') && !has_priv('approve_events')) {
+    header('Location: dashboard.php?forbidden=1');
     exit();
 }
 
@@ -30,7 +34,8 @@ $is_hold = ($event['status'] == 'hold');
 $is_past_event = (strtotime($event['event_date']) < time());
 
 $volunteers = $conn->query("
-    SELECT v.id as vol_link_id, v.role, v.status as vol_status, u.full_name, u.email, u.phone, u.id as user_id
+    SELECT v.id as vol_link_id, v.role, v.status as vol_status, v.attended as vol_attended, v.attendance_marked_at as vol_attendance_at,
+           u.full_name, u.email, u.phone, u.id as user_id
     FROM volunteers v
     JOIN users u ON v.user_id = u.id
     WHERE v.event_id = $id
@@ -38,7 +43,8 @@ $volunteers = $conn->query("
 
 // Fetch Participants
 $participants = $conn->query("
-    SELECT p.id as participant_link_id, p.status as participant_status, u.full_name, u.email, u.phone, u.id as user_id
+    SELECT p.id as participant_link_id, p.status as participant_status, p.department_class, p.attended as participant_attended, p.attendance_marked_at as participant_attendance_at,
+           u.full_name, u.email, u.phone, u.id as user_id
     FROM participant p
     JOIN users u ON p.user_id = u.id
     WHERE p.event_id = $id
@@ -258,6 +264,8 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                                         <tr>
                                             <th>Student Name</th>
                                             <th>Assigned Role</th>
+                                            <th>Phone</th>
+                                            <th>Attendance</th>
                                             <th>Status</th>
                                             <th>E-Certificate</th>
                                             <th class="text-end">Action</th>
@@ -277,13 +285,18 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                                                     <small class="text-muted"><?php echo htmlspecialchars($vol['email']); ?></small>
                                                 </td>
                                                 <td><span class="text-primary fw-semibold"><?php echo htmlspecialchars($vol['role']); ?></span></td>
+                                                <td><small class="text-muted"><?php echo htmlspecialchars($vol['phone']); ?></small></td>
+                                                <td><small class="text-muted"><?php
+                                                    $va = $vol['vol_attended'] ?? null;
+                                                    echo $va === null || $va === '' ? '—' : ((int)$va === 1 ? 'Present' : 'Absent');
+                                                ?></small></td>
                                                 <td>
                                                     <span class="vol-badge bg-<?php echo $vol['vol_status'] == 'active' ? 'success' : 'danger'; ?> bg-opacity-10 text-<?php echo $vol['vol_status'] == 'active' ? 'success' : 'danger'; ?>">
                                                         <?php echo strtoupper($vol['vol_status']); ?>
                                                     </span>
                                                 </td>
                                                 <td>
-                                                    <?php if ($is_past_event): ?>
+                                                    <?php if ($is_past_event && has_priv('certificates')): ?>
                                                         <?php if ($has_cert): ?>
                                                             <a href="<?php echo htmlspecialchars($certificates[$cert_key]); ?>" target="_blank" class="btn btn-sm btn-outline-success"><i class="fas fa-certificate me-1"></i>View</a>
                                                         <?php endif; ?>
@@ -292,6 +305,8 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                                                             <input type="file" accept=".pdf,image/jpeg,image/png,image/gif,image/webp" hidden onchange="uploadCertificate(<?php echo (int)$vol['user_id']; ?>, 'volunteer', this)">
                                                         </label>
                                                         <small class="d-block text-muted" style="font-size: 0.65rem;">PDF/Image, max 5MB</small>
+                                                    <?php elseif ($is_past_event): ?>
+                                                        <span class="text-muted small">No certificate access</span>
                                                     <?php else: ?>
                                                         <span class="text-muted small">Available after event ends</span>
                                                     <?php endif; ?>
@@ -306,7 +321,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                                             </tr>
                                             <?php endwhile; ?>
                                         <?php else: ?>
-                                            <tr><td colspan="5" class="text-center py-4 text-muted">No volunteers have joined yet.</td></tr>
+                                            <tr><td colspan="7" class="text-center py-4 text-muted">No volunteers have joined yet.</td></tr>
                                         <?php endif; ?>
                                     </tbody>
                                 </table>
@@ -321,6 +336,8 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                                         <tr>
                                             <th>Student Name</th>
                                             <th>Contact</th>
+                                            <th>Dept / Class</th>
+                                            <th>Attendance</th>
                                             <th>Status</th>
                                             <th>E-Certificate</th>
                                             <th>Winner</th>
@@ -342,13 +359,18 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                                                     <small class="text-muted"><?php echo htmlspecialchars($part['email']); ?></small>
                                                 </td>
                                                 <td><small class="text-muted"><?php echo htmlspecialchars($part['phone']); ?></small></td>
+                                                <td><small class="text-muted"><?php echo htmlspecialchars($part['department_class'] ?? ''); ?></small></td>
+                                                <td><small class="text-muted"><?php
+                                                    $pa = $part['participant_attended'] ?? null;
+                                                    echo $pa === null || $pa === '' ? '—' : ((int)$pa === 1 ? 'Present' : 'Absent');
+                                                ?></small></td>
                                                 <td>
                                                     <span class="vol-badge bg-<?php echo $part['participant_status'] == 'active' ? 'success' : 'danger'; ?> bg-opacity-10 text-<?php echo $part['participant_status'] == 'active' ? 'success' : 'danger'; ?>">
                                                         <?php echo strtoupper($part['participant_status']); ?>
                                                     </span>
                                                 </td>
                                                 <td>
-                                                    <?php if ($is_past_event): ?>
+                                                    <?php if ($is_past_event && has_priv('certificates')): ?>
                                                         <?php if ($has_cert): ?>
                                                             <a href="<?php echo htmlspecialchars($certificates[$cert_key]); ?>" target="_blank" class="btn btn-sm btn-outline-success"><i class="fas fa-certificate me-1"></i>View</a>
                                                         <?php endif; ?>
@@ -357,6 +379,8 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                                                             <input type="file" accept=".pdf,image/jpeg,image/png,image/gif,image/webp" hidden onchange="uploadCertificate(<?php echo (int)$part['user_id']; ?>, 'participant', this)">
                                                         </label>
                                                         <small class="d-block text-muted" style="font-size: 0.65rem;">PDF/Image, max 5MB</small>
+                                                    <?php elseif ($is_past_event): ?>
+                                                        <span class="text-muted small">No certificate access</span>
                                                     <?php else: ?>
                                                         <span class="text-muted small">Available after event ends</span>
                                                     <?php endif; ?>
@@ -387,7 +411,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                                             </tr>
                                             <?php endwhile; ?>
                                         <?php else: ?>
-                                            <tr><td colspan="6" class="text-center py-4 text-muted">No participants have registered yet.</td></tr>
+                                            <tr><td colspan="8" class="text-center py-4 text-muted">No participants have registered yet.</td></tr>
                                         <?php endif; ?>
                                     </tbody>
                                 </table>
@@ -419,7 +443,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                         <?php endif; ?>
                     </div>
                     
-                    <?php if ($is_pending): ?>
+                    <?php if ($is_pending && has_priv('approve_events')): ?>
                         <!-- Pending Event Management -->
                         <div class="checklist-item" onclick="document.getElementById('checkVenue').click()">
                             <input class="form-check-input verify-check" type="checkbox" id="checkVenue" onclick="event.stopPropagation()">
@@ -450,7 +474,10 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                             <i class="fas fa-times-circle me-2"></i>REJECT REQUEST
                         </button>
 
-                    <?php elseif($is_hold): ?>
+                    <?php elseif ($is_pending): ?>
+                        <p class="text-muted small mb-0">You do not have permission to approve or reject events.</p>
+
+                    <?php elseif($is_hold && has_priv('approve_events')): ?>
                         <!-- On Hold Event Management -->
                         <div class="alert alert-warning mb-3">
                             <i class="fas fa-pause-circle me-2"></i>This event is currently <strong>ON HOLD</strong>
@@ -468,7 +495,10 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                             <i class="fas fa-times-circle me-2"></i>REJECT REQUEST
                         </button>
 
-                    <?php elseif($event['status'] == 'approved'): ?>
+                    <?php elseif($is_hold): ?>
+                        <p class="text-muted small mb-0">You do not have permission to change hold status.</p>
+
+                    <?php elseif($event['status'] == 'approved' && has_priv('approve_events')): ?>
                         <!-- Approved Event Management -->
                         <div class="alert alert-success mb-3">
                             <i class="fas fa-check-circle me-2"></i>This event is <strong>LIVE & APPROVED</strong>
@@ -481,6 +511,9 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                         <button onclick="showRescheduleModal()" class="btn-action-main" style="background: #3498db; color: white;">
                             <i class="fas fa-calendar-check me-2"></i>RESCHEDULE EVENT
                         </button>
+
+                    <?php elseif($event['status'] == 'approved'): ?>
+                        <p class="text-muted small mb-0">You do not have permission to hold or reschedule from this role.</p>
                         
                     <?php else: ?>
                         <div class="text-center py-4">
@@ -501,10 +534,15 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                     <div class="small mb-2"><strong>Venue:</strong> <?php echo htmlspecialchars($pending_edit['venue']); ?></div>
                     <?php if (!empty($pending_edit['event_date'])): ?><div class="small mb-2"><strong>Event date:</strong> <?php echo date('M d, Y h:i A', strtotime($pending_edit['event_date'])); ?></div><?php endif; ?>
                     <?php if (!empty($pending_edit['category'])): ?><div class="small mb-3"><strong>Category:</strong> <?php echo htmlspecialchars($pending_edit['category']); ?></div><?php endif; ?>
+                    <?php if (!empty($pending_edit['rules'])): ?><div class="small mb-3"><strong>Rules:</strong> <?php echo nl2br(htmlspecialchars($pending_edit['rules'])); ?></div><?php endif; ?>
+                    <?php if (has_priv('approve_events')): ?>
                     <div class="d-flex gap-2">
                         <button type="button" class="btn btn-success btn-sm" onclick="approveOrRejectEdit('approve')"><i class="fas fa-check me-1"></i>Approve edit</button>
                         <button type="button" class="btn btn-outline-danger btn-sm" onclick="approveOrRejectEdit('reject')"><i class="fas fa-times me-1"></i>Reject</button>
                     </div>
+                    <?php else: ?>
+                    <p class="text-muted small mb-0">You do not have permission to approve pending edits.</p>
+                    <?php endif; ?>
                 </div>
                 <?php endif; ?>
 

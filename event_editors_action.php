@@ -1,10 +1,15 @@
 <?php
 session_start();
 include 'db.php';
+require_once __DIR__ . '/admin_priv.php';
 header('Content-Type: application/json');
 
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     echo json_encode(['status' => 'error', 'message' => 'Unauthorized']);
+    exit();
+}
+if (!has_priv('events')) {
+    echo json_encode(['status' => 'error', 'message' => 'Forbidden']);
     exit();
 }
 

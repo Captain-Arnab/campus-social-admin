@@ -1,12 +1,13 @@
 <?php
 session_start();
 include 'db.php';
+require_once __DIR__ . '/admin_priv.php';
 
-// Security Check
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     header("Location: index.php");
     exit();
 }
+require_priv('manage_users');
 
 if (isset($_GET['id']) && isset($_GET['action']) && isset($_GET['type'])) {
     $id = intval($_GET['id']);

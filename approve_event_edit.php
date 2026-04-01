@@ -1,11 +1,13 @@
 <?php
 session_start();
 include 'db.php';
+require_once __DIR__ . '/admin_priv.php';
 
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     header("Location: index.php");
     exit();
 }
+require_priv('approve_events');
 
 $user_type = $_SESSION['user_type'] ?? 'admin';
 $username = isset($_SESSION['admin']) ? $_SESSION['admin'] : $_SESSION['subadmin'];
@@ -40,6 +42,16 @@ if ($action === 'approve') {
         }
         if ($category) {
             $conn->query("UPDATE events SET category='" . $conn->real_escape_string($category) . "' WHERE id=$id");
+        }
+        $has_rules = @$conn->query("SHOW COLUMNS FROM event_pending_edits LIKE 'rules'");
+        if ($has_rules && $has_rules->num_rows > 0 && array_key_exists('rules', $pending) && $pending['rules'] !== null) {
+            $rules_esc = $conn->real_escape_string($pending['rules']);
+            $conn->query("UPDATE events SET rules='$rules_esc' WHERE id=$id");
+        }
+        $has_banners_pe = @$conn->query("SHOW COLUMNS FROM event_pending_edits LIKE 'banners'");
+        if ($has_banners_pe && $has_banners_pe->num_rows > 0 && !empty($pending['banners'])) {
+            $b_esc = $conn->real_escape_string($pending['banners']);
+            $conn->query("UPDATE events SET banners='$b_esc' WHERE id=$id");
         }
         $conn->query("DELETE FROM event_pending_edits WHERE event_id = $id");
         $log_stmt = $conn->prepare("INSERT INTO event_status_log (event_id, admin_type, admin_username, old_status, new_status, remarks) VALUES (?, ?, ?, ?, ?, ?)");

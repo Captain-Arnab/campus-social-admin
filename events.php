@@ -1,12 +1,13 @@
 <?php
 session_start();
 include 'db.php';
+require_once __DIR__ . '/admin_priv.php';
 
-// Admin or Subadmin login check
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     header("Location: index.php");
     exit();
 }
+require_priv('events');
 
 $view = isset($_GET['view']) ? $_GET['view'] : 'live';
 $search_query = isset($_GET['search']) ? $_GET['search'] : '';
@@ -93,9 +94,11 @@ if (isset($_GET['ajax_filter'])) {
                 </td>
                 <td class="text-end pe-4">
                     <div class="d-flex gap-2 justify-content-end">
+                        <?php if (has_priv('reports')): ?>
                         <a href="download_report.php?event_id=<?php echo $row['id']; ?>" class="btn-icon btn-download" title="Download Report">
                             <i class="fas fa-download"></i>
                         </a>
+                        <?php endif; ?>
                         <a href="event_details.php?id=<?php echo $row['id']; ?>" class="btn-icon btn-view">
                             <i class="fas fa-chevron-right"></i>
                         </a>
@@ -276,6 +279,7 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
         </div>
 
         <!-- Bulk Actions Bar -->
+        <?php if (has_priv('reports')): ?>
         <div class="bulk-actions-bar" id="bulkActionsBar">
             <div>
                 <span class="fw-bold"><span id="selectedCount">0</span> events selected</span>
@@ -287,6 +291,7 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
                 </button>
             </div>
         </div>
+        <?php endif; ?>
 
         <div class="filter-card">
             <div class="row g-3 align-items-center">
@@ -368,9 +373,11 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
                             </td>
                             <td class="text-end pe-4">
                                 <div class="d-flex gap-2 justify-content-end">
+                                    <?php if (has_priv('reports')): ?>
                                     <a href="download_report.php?event_id=<?php echo $row['id']; ?>" class="btn-icon btn-download" title="Download Report">
                                         <i class="fas fa-download"></i>
                                     </a>
+                                    <?php endif; ?>
                                     <a href="event_details.php?id=<?php echo $row['id']; ?>" class="btn-icon btn-view">
                                         <i class="fas fa-chevron-right"></i>
                                     </a>
@@ -423,7 +430,7 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
             });
         }
 
-        selectAllCheckbox.addEventListener('change', function() {
+        selectAllCheckbox?.addEventListener('change', function() {
             const checkboxes = document.querySelectorAll('.event-checkbox');
             checkboxes.forEach(cb => cb.checked = this.checked);
             updateBulkActions();
@@ -433,12 +440,12 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
             const checkedBoxes = document.querySelectorAll('.event-checkbox:checked');
             const count = checkedBoxes.length;
             
-            selectedCountSpan.textContent = count;
+            if (selectedCountSpan) selectedCountSpan.textContent = count;
             
             if (count > 0) {
-                bulkActionsBar.classList.add('active');
+                bulkActionsBar?.classList.add('active');
             } else {
-                bulkActionsBar.classList.remove('active');
+                bulkActionsBar?.classList.remove('active');
             }
             
             // Update select all checkbox state

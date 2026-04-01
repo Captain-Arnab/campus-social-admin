@@ -1,11 +1,13 @@
 <?php
 session_start();
 include 'db.php';
+require_once __DIR__ . '/admin_priv.php';
 
 if ((!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) || !isset($_GET['id'])) {
     header("Location: users.php");
     exit();
 }
+require_priv('manage_users');
 
 $user_id = intval($_GET['id']);
 // Fetching user details securely

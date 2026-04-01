@@ -4,40 +4,69 @@ ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 session_start();
 include 'db.php';
+require_once __DIR__ . '/admin_priv.php';
 
 $login_error = false;
 
+function portal_verify_password($stored, $input) {
+    if ($stored === null || $stored === '') {
+        return false;
+    }
+    if (is_string($stored) && strncmp($stored, '$2y$', 4) === 0) {
+        return password_verify((string) $input, $stored);
+    }
+    return hash_equals((string) $stored, (string) $input);
+}
+
 if (isset($_POST['login'])) {
-    $username = $_POST['username'];
+    $username = $conn->real_escape_string($_POST['username']);
     $password = $_POST['password'];
 
-    // First check in admins table
-    $admin_sql = "SELECT * FROM admins WHERE username='$username' AND password='$password'";
+    $admin_sql = "SELECT * FROM admins WHERE username='$username' LIMIT 1";
     $admin_result = $conn->query($admin_sql);
 
-    if ($admin_result->num_rows > 0) {
-        // Admin login successful
-        $_SESSION['admin'] = $username;
-        $_SESSION['user_type'] = 'admin';
-        header("Location: dashboard.php?msg=welcome");
-        exit();
-    } else {
-        // Check in subadmins table
-        $subadmin_sql = "SELECT * FROM subadmins WHERE username='$username' AND password='$password' AND status='active'";
-        $subadmin_result = $conn->query($subadmin_sql);
-
-        if ($subadmin_result->num_rows > 0) {
-            $subadmin = $subadmin_result->fetch_assoc();
-            $_SESSION['subadmin'] = $username;
-            $_SESSION['subadmin_name'] = $subadmin['full_name'];
-            $_SESSION['subadmin_id'] = $subadmin['id'];
-            $_SESSION['user_type'] = 'subadmin';
+    if ($admin_result && $admin_result->num_rows > 0) {
+        $admin = $admin_result->fetch_assoc();
+        if (portal_verify_password($admin['password'], $password)) {
+            $_SESSION['admin'] = $admin['username'];
+            $_SESSION['user_type'] = 'admin';
+            unset($_SESSION['subadmin'], $_SESSION['subadmin_id'], $_SESSION['subadmin_name'], $_SESSION['subadmin_privileges']);
             header("Location: dashboard.php?msg=welcome");
             exit();
-        } else {
-            $login_error = true;
         }
     }
+
+    $subadmin_sql = "SELECT * FROM subadmins WHERE username='$username' AND status='active' LIMIT 1";
+    $subadmin_result = $conn->query($subadmin_sql);
+
+    if ($subadmin_result && $subadmin_result->num_rows > 0) {
+        $subadmin = $subadmin_result->fetch_assoc();
+        if (portal_verify_password($subadmin['password'], $password)) {
+            $_SESSION['subadmin'] = $subadmin['username'];
+            $_SESSION['subadmin_name'] = $subadmin['full_name'];
+            $_SESSION['subadmin_id'] = (int) $subadmin['id'];
+            $_SESSION['user_type'] = 'subadmin';
+            unset($_SESSION['admin']);
+
+            $privs = [];
+            $pr = @$conn->query("SELECT privilege FROM subadmin_privileges WHERE subadmin_id = " . (int) $subadmin['id']);
+            if ($pr) {
+                while ($row = $pr->fetch_assoc()) {
+                    $privs[] = $row['privilege'];
+                }
+            }
+            $all_keys = array_keys(subadmin_privilege_definitions());
+            if (empty($privs)) {
+                $privs = $all_keys;
+            }
+            $_SESSION['subadmin_privileges'] = $privs;
+
+            header("Location: dashboard.php?msg=welcome");
+            exit();
+        }
+    }
+
+    $login_error = true;
 }
 ?>
 

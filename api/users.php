@@ -1,5 +1,6 @@
 <?php
 include 'db.php';
+require_once __DIR__ . '/sms_helper.php';
 $method = $_SERVER['REQUEST_METHOD'];
 
 // Helper for security
@@ -66,6 +67,9 @@ if ($method == 'POST') {
             }
         }
         
+        $department_class_reg = isset($data['department_class']) ? trim((string) $data['department_class']) : '';
+        $department_class_sql = $department_class_reg !== '' ? "'" . $conn->real_escape_string($department_class_reg) . "'" : 'NULL';
+
         // Sanitize inputs - bio and interests are optional
         $name = $conn->real_escape_string($data['full_name']);
         $email = $conn->real_escape_string($data['email']);
@@ -96,12 +100,12 @@ if ($method == 'POST') {
             // Insert into student_faculty table
             if ($is_student == 1) {
                 $roll_number = $conn->real_escape_string($data['roll_number']);
-                $sf_sql = "INSERT INTO student_faculty (user_id, roll_number, emp_number) 
-                          VALUES ($user_id, '$roll_number', 'NA')";
+                $sf_sql = "INSERT INTO student_faculty (user_id, roll_number, emp_number, department_class) 
+                          VALUES ($user_id, '$roll_number', 'NA', $department_class_sql)";
             } else {
                 $emp_number = $conn->real_escape_string($data['emp_number']);
-                $sf_sql = "INSERT INTO student_faculty (user_id, roll_number, emp_number) 
-                          VALUES ($user_id, 'NA', '$emp_number')";
+                $sf_sql = "INSERT INTO student_faculty (user_id, roll_number, emp_number, department_class) 
+                          VALUES ($user_id, 'NA', '$emp_number', $department_class_sql)";
             }
             
             if ($conn->query($sf_sql)) {
@@ -121,8 +125,8 @@ if ($method == 'POST') {
         }
     }
     
-    // 2. LOGIN
-    elseif ($action == 'login') {
+    // 2a. SEND LOGIN OTP (SMS; mobile only — same identifier + phone as login)
+    elseif ($action == 'send_login_otp') {
         $data = json_decode(file_get_contents("php://input"), true);
         
         if ($data === null) {
@@ -130,13 +134,21 @@ if ($method == 'POST') {
             exit();
         }
         
-        $identifier = $conn->real_escape_string($data['identifier']); // roll_number or emp_number
-        $email_or_phone = $conn->real_escape_string($data['email_or_phone']);
-        $password = $data['password'];
-        $is_student = (int)$data['is_student'];
-        $by_mobile = (int)$data['by_mobile'];
+        $by_mobile = (int)($data['by_mobile'] ?? 0);
+        if ($by_mobile !== 1) {
+            echo json_encode(["status" => "error", "message" => "SMS OTP is only available when logging in with mobile"]);
+            exit();
+        }
         
-        // First, find user by identifier in student_faculty table
+        $identifier = $conn->real_escape_string($data['identifier'] ?? '');
+        $email_or_phone = $data['email_or_phone'] ?? '';
+        $is_student = (int)($data['is_student'] ?? 0);
+        
+        if ($identifier === '' || $email_or_phone === '') {
+            echo json_encode(["status" => "error", "message" => "identifier and email_or_phone are required"]);
+            exit();
+        }
+        
         $identifier_field = $is_student ? 'roll_number' : 'emp_number';
         $sf_query = "SELECT user_id FROM student_faculty WHERE $identifier_field = '$identifier'";
         $sf_result = $conn->query($sf_query);
@@ -146,61 +158,204 @@ if ($method == 'POST') {
             exit();
         }
         
-        $sf_row = $sf_result->fetch_assoc();
-        $user_id = (int)$sf_row['user_id'];
+        $user_id = (int)$sf_result->fetch_assoc()['user_id'];
+        $u2 = $conn->query("SELECT id, full_name, phone, status, is_student FROM users WHERE id = $user_id");
+        if (!$u2 || $u2->num_rows == 0) {
+            echo json_encode(["status" => "error", "message" => "User not found"]);
+            exit();
+        }
+        $user = $u2->fetch_assoc();
+        if (!sms_phones_match($email_or_phone, $user['phone'])) {
+            echo json_encode(["status" => "error", "message" => "Phone number not found or doesn't match"]);
+            exit();
+        }
         
-        // Now verify email/phone and password
-        $field = $by_mobile ? 'phone' : 'email';
-        $user_query = "SELECT id, password, full_name, profile_pic, status, is_student 
-                       FROM users 
-                       WHERE id = $user_id AND $field = '$email_or_phone'";
-        $result = $conn->query($user_query);
+        if ((int)$user['is_student'] != $is_student) {
+            echo json_encode(["status" => "error", "message" => "Account type mismatch"]);
+            exit();
+        }
+        if ($user['status'] == 'blocked') {
+            echo json_encode(["status" => "error", "message" => "Account blocked"]);
+            exit();
+        }
         
-        if ($result->num_rows > 0) {
-            $user = $result->fetch_assoc();
-            
-            // Check if user role matches
-            if ((int)$user['is_student'] != $is_student) {
-                echo json_encode(["status" => "error", "message" => "Account type mismatch"]);
-                exit();
-            }
-            
-            if ($user['status'] == 'blocked') {
-                echo json_encode(["status" => "error", "message" => "Account blocked"]);
-                exit();
-            }
-            
-            if (password_verify($password, $user['password'])) {
-                // Get role-specific information
-                $sf_data_result = $conn->query("SELECT roll_number, emp_number FROM student_faculty WHERE user_id = $user_id");
-                $sf_data = $sf_data_result->fetch_assoc();
-                
-                // Generate a simple token (in production use JWT)
-                $token = bin2hex(random_bytes(16));
-                
-                $response = [
-                    "status" => "success", 
-                    "message" => "Login successful",
-                    "user_id" => $user_id,
-                    "user_name" => $user['full_name'],
-                    "is_student" => (int)$user['is_student'],
-                    "token" => $token
-                ];
-                
-                // Add role-specific data
-                if ($user['is_student'] == 1) {
-                    $response['roll_number'] = $sf_data['roll_number'];
-                } else {
-                    $response['emp_number'] = $sf_data['emp_number'];
+        $dest = sms_normalize_india_mobile($user['phone']);
+        if ($dest === null) {
+            echo json_encode(["status" => "error", "message" => "Invalid registered mobile number"]);
+            exit();
+        }
+        
+        $throttle = $conn->query("SELECT last_sent_at FROM login_otps WHERE user_id = $user_id");
+        if ($throttle && $throttle->num_rows > 0) {
+            $row = $throttle->fetch_assoc();
+            if (!empty($row['last_sent_at'])) {
+                $last = strtotime($row['last_sent_at']);
+                if ($last !== false && (time() - $last) < 60) {
+                    echo json_encode(["status" => "error", "message" => "Please wait a minute before requesting another OTP"]);
+                    exit();
                 }
-                
-                echo json_encode($response);
+            }
+        }
+        
+        $otp = (string) random_int(100000, 999999);
+        $hash = password_hash($otp, PASSWORD_DEFAULT);
+        $phone_esc = $conn->real_escape_string($dest);
+        $hash_esc = $conn->real_escape_string($hash);
+        
+        $sql = "INSERT INTO login_otps (user_id, phone, otp_hash, expires_at, failed_attempts, last_sent_at)
+                VALUES ($user_id, '$phone_esc', '$hash_esc', DATE_ADD(NOW(), INTERVAL 10 MINUTE), 0, NOW())
+                ON DUPLICATE KEY UPDATE
+                    phone = VALUES(phone),
+                    otp_hash = VALUES(otp_hash),
+                    expires_at = VALUES(expires_at),
+                    failed_attempts = 0,
+                    last_sent_at = NOW()";
+        
+        if (!$conn->query($sql)) {
+            echo json_encode([
+                "status" => "error",
+                "message" => "Could not create OTP. Ensure the login_otps table exists (see migrations/002_login_otp.sql).",
+                "detail" => $conn->error
+            ]);
+            exit();
+        }
+        
+        $message = sms_build_login_otp_message($otp);
+        $send = sms_send_connectbind($dest, $message);
+        if (!$send['ok']) {
+            echo json_encode([
+                "status" => "error",
+                "message" => "SMS could not be sent",
+                "detail" => $send['error'] ?? $send['body']
+            ]);
+            exit();
+        }
+        
+        echo json_encode(["status" => "success", "message" => "OTP sent to your registered mobile number"]);
+    }
+    
+    // 2. LOGIN (password or OTP when by_mobile=1)
+    elseif ($action == 'login') {
+        $data = json_decode(file_get_contents("php://input"), true);
+        
+        if ($data === null) {
+            echo json_encode(["status" => "error", "message" => "Invalid JSON data"]);
+            exit();
+        }
+        
+        $identifier = $conn->real_escape_string($data['identifier']); // roll_number or emp_number
+        $contact_raw = trim((string)($data['email_or_phone'] ?? ''));
+        $password = $data['password'] ?? '';
+        $is_student = (int)$data['is_student'];
+        $by_mobile = (int)$data['by_mobile'];
+        $otp_input = isset($data['otp']) ? trim((string) $data['otp']) : '';
+        $use_otp = $otp_input !== '';
+        
+        if ($contact_raw === '') {
+            echo json_encode(["status" => "error", "message" => "email_or_phone is required"]);
+            exit();
+        }
+        
+        $identifier_field = $is_student ? 'roll_number' : 'emp_number';
+        $sf_query = "SELECT user_id FROM student_faculty WHERE $identifier_field = '$identifier'";
+        $sf_result = $conn->query($sf_query);
+        
+        if ($sf_result->num_rows == 0) {
+            echo json_encode(["status" => "error", "message" => "Invalid " . ($is_student ? "roll number" : "employee ID")]);
+            exit();
+        }
+        
+        $user_id = (int)$sf_result->fetch_assoc()['user_id'];
+        
+        $user_res = $conn->query("SELECT id, password, full_name, profile_pic, status, is_student, phone, email FROM users WHERE id = $user_id");
+        if (!$user_res || $user_res->num_rows == 0) {
+            echo json_encode(["status" => "error", "message" => "User not found"]);
+            exit();
+        }
+        $user = $user_res->fetch_assoc();
+        
+        if ($by_mobile) {
+            if (!sms_phones_match($contact_raw, $user['phone'])) {
+                echo json_encode(["status" => "error", "message" => "Phone number not found or doesn't match"]);
+                exit();
+            }
+        } else {
+            if (strcasecmp($contact_raw, trim($user['email'])) !== 0) {
+                echo json_encode(["status" => "error", "message" => "Email not found or doesn't match"]);
+                exit();
+            }
+        }
+        
+        if ((int)$user['is_student'] != $is_student) {
+            echo json_encode(["status" => "error", "message" => "Account type mismatch"]);
+            exit();
+        }
+        
+        if ($user['status'] == 'blocked') {
+            echo json_encode(["status" => "error", "message" => "Account blocked"]);
+            exit();
+        }
+        
+        $issue_token = function () use ($conn, $user_id, $user) {
+            $sf_data_result = $conn->query("SELECT roll_number, emp_number FROM student_faculty WHERE user_id = $user_id");
+            $sf_data = $sf_data_result->fetch_assoc();
+            $token = bin2hex(random_bytes(16));
+            $response = [
+                "status" => "success",
+                "message" => "Login successful",
+                "user_id" => $user_id,
+                "user_name" => $user['full_name'],
+                "is_student" => (int)$user['is_student'],
+                "token" => $token
+            ];
+            if ($user['is_student'] == 1) {
+                $response['roll_number'] = $sf_data['roll_number'];
+            } else {
+                $response['emp_number'] = $sf_data['emp_number'];
+            }
+            return $response;
+        };
+        
+        if ($use_otp) {
+            if (!$by_mobile) {
+                echo json_encode(["status" => "error", "message" => "OTP login requires mobile (by_mobile = 1)"]);
+                exit();
+            }
+            if (!preg_match('/^\d{6}$/', $otp_input)) {
+                echo json_encode(["status" => "error", "message" => "Enter the 6-digit OTP"]);
+                exit();
+            }
+            $otp_res = $conn->query("SELECT phone, otp_hash, expires_at, failed_attempts FROM login_otps WHERE user_id = $user_id");
+            if (!$otp_res || $otp_res->num_rows == 0) {
+                echo json_encode(["status" => "error", "message" => "No OTP found. Request a new code."]);
+                exit();
+            }
+            $orow = $otp_res->fetch_assoc();
+            if (strtotime($orow['expires_at']) < time()) {
+                echo json_encode(["status" => "error", "message" => "OTP expired. Request a new code."]);
+                exit();
+            }
+            if ((int)$orow['failed_attempts'] >= 5) {
+                echo json_encode(["status" => "error", "message" => "Too many failed attempts. Request a new OTP."]);
+                exit();
+            }
+            if (!password_verify($otp_input, $orow['otp_hash'])) {
+                $conn->query("UPDATE login_otps SET failed_attempts = failed_attempts + 1 WHERE user_id = $user_id");
+                echo json_encode(["status" => "error", "message" => "Invalid OTP"]);
+                exit();
+            }
+            $conn->query("DELETE FROM login_otps WHERE user_id = $user_id");
+            echo json_encode($issue_token());
+        } else {
+            if ($password === '' || $password === null) {
+                echo json_encode(["status" => "error", "message" => "Password required, or use OTP with the SMS flow"]);
+                exit();
+            }
+            if (password_verify($password, $user['password'])) {
+                echo json_encode($issue_token());
             } else {
                 echo json_encode(["status" => "error", "message" => "Invalid password"]);
             }
-        } else {
-            $msg = $by_mobile ? "Phone number not found or doesn't match" : "Email not found or doesn't match";
-            echo json_encode(["status" => "error", "message" => $msg]);
         }
     }
 
@@ -213,11 +368,16 @@ if ($method == 'POST') {
         $bio = $conn->real_escape_string($data['bio'] ?? '');
 
         $sql = "UPDATE users SET interests='$interests', bio='$bio' WHERE id=$id";
-        if ($conn->query($sql)) {
-            echo json_encode(["status" => "success", "message" => "Profile updated"]);
-        } else {
+        if (!$conn->query($sql)) {
             echo json_encode(["status" => "error", "message" => "Update failed: " . $conn->error]);
+            exit();
         }
+        if (array_key_exists('department_class', $data)) {
+            $dc = trim((string) $data['department_class']);
+            $dc_sql = $dc === '' ? 'NULL' : "'" . $conn->real_escape_string($dc) . "'";
+            $conn->query("UPDATE student_faculty SET department_class = $dc_sql WHERE user_id = $id");
+        }
+        echo json_encode(["status" => "success", "message" => "Profile updated"]);
     }
 
     // 4. UPLOAD PICTURE
@@ -268,8 +428,8 @@ if ($method == 'GET') {
         $participating = (int)$conn->query("SELECT count(*) as c FROM participant WHERE user_id=$user_id")->fetch_assoc()['c'];
         
         // Get role-specific information
-        $sf_result = $conn->query("SELECT roll_number, emp_number FROM student_faculty WHERE user_id = $user_id");
-        $sf_data = $sf_result->fetch_assoc();
+        $sf_result = $conn->query("SELECT roll_number, emp_number, department_class FROM student_faculty WHERE user_id = $user_id");
+        $sf_data = $sf_result ? $sf_result->fetch_assoc() : null;
 
         $response = [
             "status" => "success",
@@ -281,7 +441,8 @@ if ($method == 'GET') {
                 "bio" => $user['bio'],
                 "interests" => $user['interests'],
                 "profile_pic" => $user['profile_pic'],
-                "is_student" => (int)$user['is_student']
+                "is_student" => (int)$user['is_student'],
+                "department_class" => $sf_data['department_class'] ?? null
             ],
             "stats" => [
                 "created" => $created,
@@ -294,9 +455,9 @@ if ($method == 'GET') {
         
         // Add role-specific data
         if ($user['is_student'] == 1) {
-            $response['data']['roll_number'] = $sf_data['roll_number'];
+            $response['data']['roll_number'] = $sf_data['roll_number'] ?? '';
         } else {
-            $response['data']['emp_number'] = $sf_data['emp_number'];
+            $response['data']['emp_number'] = $sf_data['emp_number'] ?? '';
         }
         
         echo json_encode($response);

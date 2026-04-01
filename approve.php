@@ -1,12 +1,13 @@
 <?php
 session_start();
 include 'db.php';
+require_once __DIR__ . '/admin_priv.php';
 
-// Check if user is logged in (admin or subadmin)
 if ((!isset($_SESSION['admin']) && !isset($_SESSION['subadmin']))) {
     header("Location: index.php");
     exit();
 }
+require_priv('approve_events');
 
 $user_type = $_SESSION['user_type'] ?? 'admin';
 $username = isset($_SESSION['admin']) ? $_SESSION['admin'] : $_SESSION['subadmin'];
