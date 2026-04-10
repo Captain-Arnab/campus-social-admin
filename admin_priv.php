@@ -47,5 +47,6 @@ function subadmin_privilege_definitions(): array
         'manage_users' => 'Manage app users',
         'certificates' => 'Certificates',
         'reports' => 'Download reports',
+        'notification_schedule' => 'Celebration / notification days — cron calendar (add, view & remove)',
     ];
 }

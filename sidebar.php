@@ -286,6 +286,15 @@ if ($user_type == 'admin') {
             </li>
             <?php endif; ?>
 
+            <?php if (has_priv('notification_schedule')): ?>
+            <div class="menu-header">Notifications</div>
+            <li class="nav-item">
+                <a href="notification_schedule.php" class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'notification_schedule.php' ? 'active' : ''; ?>">
+                    <i class="fas fa-champagne-glasses"></i> Celebration days
+                </a>
+            </li>
+            <?php endif; ?>
+
             <?php if (has_priv('events')): ?>
             <div class="menu-header">Event Management</div>
             <li class="nav-item">

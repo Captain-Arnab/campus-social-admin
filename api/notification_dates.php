@@ -1,5 +1,9 @@
 <?php
-// notification_dates.php — Get list of dates for notifications (and optionally manage them)
+/**
+ * notification_dates.php — List dates when the app/calendar may show notifications.
+ * Data comes from celebration_days (same rows the cron uses for broadcast greetings).
+ * Optional: include_events=1 merges approved event start dates (informational only; cron does not use them).
+ */
 header('Content-Type: application/json');
 
 try {
@@ -7,132 +11,130 @@ try {
 
     if (!$conn) {
         http_response_code(500);
-        echo json_encode(["status" => "error", "message" => "Database connection failed"]);
+        echo json_encode(['status' => 'error', 'message' => 'Database connection failed']);
         exit();
     }
 
-    $table_check = $conn->query("SHOW TABLES LIKE 'notification_dates'");
-    if (!$table_check || $table_check->num_rows === 0) {
+    $celebration_check = $conn->query("SHOW TABLES LIKE 'celebration_days'");
+    if (!$celebration_check || $celebration_check->num_rows === 0) {
         http_response_code(500);
-        echo json_encode(["status" => "error", "message" => "Notification tables not installed. Run api/migrations/add_notification_tables.sql"]);
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'celebration_days table missing. Import college schema or create celebration_days.',
+        ]);
         exit();
+    }
+
+    $has_push = false;
+    $pc = @$conn->query("SHOW COLUMNS FROM `celebration_days` LIKE 'push_title'");
+    if ($pc && $pc->num_rows > 0) {
+        $has_push = true;
     }
 
     $method = $_SERVER['REQUEST_METHOD'];
 
-    // GET — return list of notification dates (from notification_dates table and optionally upcoming event dates)
     if ($method === 'GET') {
         $include_events = isset($_GET['include_events']) && $_GET['include_events'] !== '0';
-        $from = isset($_GET['from']) ? $conn->real_escape_string($_GET['from']) : date('Y-m-d');
-        $to = isset($_GET['to']) ? $conn->real_escape_string($_GET['to']) : null; // no limit by default
+        $from = isset($_GET['from']) ? trim($_GET['from']) : date('Y-m-d');
+        $to = isset($_GET['to']) ? trim($_GET['to']) : '';
+
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
+            $from = date('Y-m-d');
+        }
+        if ($to !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
+            $to = '';
+        }
 
         $dates = [];
 
-        // From notification_dates table
-        $sql = "SELECT nd.id, nd.event_id, nd.notify_date, nd.title, nd.message, nd.created_at, e.title as event_title
-                FROM notification_dates nd
-                LEFT JOIN events e ON e.id = nd.event_id
-                WHERE nd.notify_date >= ?
-                ORDER BY nd.notify_date ASC";
-        if ($to) {
-            $sql = "SELECT nd.id, nd.event_id, nd.notify_date, nd.title, nd.message, nd.created_at, e.title as event_title
-                    FROM notification_dates nd
-                    LEFT JOIN events e ON e.id = nd.event_id
-                    WHERE nd.notify_date >= ? AND nd.notify_date <= ?
-                    ORDER BY nd.notify_date ASC";
+        $select = $has_push
+            ? 'id, occasion_name, occasion_date, is_fixed, is_tentative, sort_order, push_title, push_message, created_at'
+            : 'id, occasion_name, occasion_date, is_fixed, is_tentative, sort_order, created_at';
+
+        if ($to !== '') {
+            $stmt = $conn->prepare(
+                "SELECT {$select} FROM celebration_days WHERE occasion_date >= ? AND occasion_date <= ? ORDER BY occasion_date ASC, sort_order ASC, id ASC"
+            );
+            $stmt->bind_param('ss', $from, $to);
+        } else {
+            $stmt = $conn->prepare(
+                "SELECT {$select} FROM celebration_days WHERE occasion_date >= ? ORDER BY occasion_date ASC, sort_order ASC, id ASC"
+            );
+            $stmt->bind_param('s', $from);
         }
-        $stmt = $conn->prepare($sql);
+
         if ($stmt) {
-            if ($to) {
-                $stmt->bind_param("ss", $from, $to);
-            } else {
-                $stmt->bind_param("s", $from);
-            }
             $stmt->execute();
             $res = $stmt->get_result();
             while ($row = $res->fetch_assoc()) {
+                $pushTitle = $has_push ? trim((string)($row['push_title'] ?? '')) : '';
+                $pushMsg = $has_push ? trim((string)($row['push_message'] ?? '')) : '';
+                $occ = $row['occasion_name'];
                 $dates[] = [
                     'id' => (int) $row['id'],
-                    'event_id' => $row['event_id'] ? (int) $row['event_id'] : null,
-                    'notify_date' => $row['notify_date'],
-                    'title' => $row['title'],
-                    'message' => $row['message'],
-                    'event_title' => $row['event_title'],
-                    'source' => 'schedule'
+                    'event_id' => null,
+                    'notify_date' => $row['occasion_date'],
+                    'title' => $pushTitle !== '' ? $pushTitle : $occ,
+                    'message' => $pushMsg !== '' ? $pushMsg : ('Happy ' . $occ . '!'),
+                    'event_title' => null,
+                    'source' => 'celebration',
+                    'occasion_name' => $occ,
+                    'is_fixed' => (bool) (int) $row['is_fixed'],
+                    'is_tentative' => (bool) (int) $row['is_tentative'],
+                    'sort_order' => $row['sort_order'] !== null ? (int) $row['sort_order'] : null,
                 ];
             }
             $stmt->close();
         }
 
-        // Optionally include upcoming event dates as notification dates
         if ($include_events) {
-            $events_sql = "SELECT id, title, event_date, venue FROM events WHERE status = 'approved' AND DATE(event_date) >= ? ORDER BY event_date ASC LIMIT 100";
-            $estmt = $conn->prepare($events_sql);
+            $estmt = $conn->prepare(
+                'SELECT id, title, event_date, venue FROM events WHERE status = \'approved\' AND DATE(event_date) >= ? ORDER BY event_date ASC LIMIT 100'
+            );
             if ($estmt) {
-                $estmt->bind_param("s", $from);
+                $estmt->bind_param('s', $from);
                 $estmt->execute();
                 $eres = $estmt->get_result();
                 while ($erow = $eres->fetch_assoc()) {
+                    $ed = date('Y-m-d', strtotime($erow['event_date']));
+                    if ($to !== '' && strcmp($ed, $to) > 0) {
+                        continue;
+                    }
                     $dates[] = [
                         'id' => 'e' . $erow['id'],
                         'event_id' => (int) $erow['id'],
-                        'notify_date' => date('Y-m-d', strtotime($erow['event_date'])),
+                        'notify_date' => $ed,
                         'title' => $erow['title'],
                         'message' => 'Event: ' . $erow['title'] . ' at ' . $erow['venue'],
                         'event_title' => $erow['title'],
-                        'source' => 'event'
+                        'source' => 'event',
                     ];
                 }
                 $estmt->close();
             }
-            // Sort by notify_date
             usort($dates, function ($a, $b) {
                 return strcmp($a['notify_date'], $b['notify_date']);
             });
         }
 
-        echo json_encode(["status" => "success", "count" => count($dates), "data" => $dates]);
+        echo json_encode(['status' => 'success', 'count' => count($dates), 'data' => $dates]);
         exit();
     }
 
-    // POST — add a notification date (e.g. for admin or organizer)
     if ($method === 'POST') {
-        $input = file_get_contents("php://input");
-        $data = json_decode($input, true);
-
-        $notify_date = isset($data['notify_date']) ? trim($data['notify_date']) : null;
-        $title = isset($data['title']) ? $conn->real_escape_string(trim($data['title'])) : '';
-        $message = isset($data['message']) ? $conn->real_escape_string(trim($data['message'])) : '';
-        $event_id = isset($data['event_id']) ? intval($data['event_id']) : null;
-
-        if (!$notify_date || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $notify_date)) {
-            http_response_code(400);
-            echo json_encode(["status" => "error", "message" => "Valid notify_date (YYYY-MM-DD) required"]);
-            exit();
-        }
-
-        $stmt = $conn->prepare("INSERT INTO notification_dates (event_id, notify_date, title, message) VALUES (?, ?, ?, ?)");
-        if (!$stmt) {
-            http_response_code(500);
-            echo json_encode(["status" => "error", "message" => "Database error: " . $conn->error]);
-            exit();
-        }
-        $stmt->bind_param("isss", $event_id, $notify_date, $title, $message);
-        if ($stmt->execute()) {
-            echo json_encode(["status" => "success", "message" => "Notification date added", "id" => $stmt->insert_id]);
-        } else {
-            http_response_code(500);
-            echo json_encode(["status" => "error", "message" => $stmt->error]);
-        }
-        $stmt->close();
+        http_response_code(403);
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'Add or edit celebration days from the admin panel (Celebration days).',
+        ]);
         exit();
     }
 
     http_response_code(405);
-    echo json_encode(["status" => "error", "message" => "Method not allowed"]);
+    echo json_encode(['status' => 'error', 'message' => 'Method not allowed']);
 } catch (Exception $e) {
     http_response_code(500);
-    echo json_encode(["status" => "error", "message" => "Server error: " . $e->getMessage()]);
+    echo json_encode(['status' => 'error', 'message' => 'Server error: ' . $e->getMessage()]);
 } finally {
     if (isset($conn) && $conn) {
         $conn->close();

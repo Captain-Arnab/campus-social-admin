@@ -1,5 +1,14 @@
 <?php
-// register_fcm_token.php — Register or update FCM token for a user (for push notifications)
+/**
+ * register_fcm_token.php
+ * Register or update FCM token for a user (push notifications).
+ *
+ * Changes from original:
+ *  - If device_id is provided, removes any OLD token for that device before inserting
+ *    (prevents token drift: same device should only have one active token)
+ *  - Sets is_active = 1 on upsert (re-activates if previously invalidated)
+ *  - Returns token_count so Flutter knows how many devices the user has registered
+ */
 header('Content-Type: application/json');
 
 try {
@@ -7,71 +16,127 @@ try {
 
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         http_response_code(405);
-        echo json_encode(["status" => "error", "message" => "Method not allowed"]);
+        echo json_encode(['status' => 'error', 'message' => 'Method not allowed']);
         exit();
     }
 
-    $input = file_get_contents("php://input");
-    $data = json_decode($input, true);
+    $input = file_get_contents('php://input');
+    $data  = json_decode($input, true);
 
-    $required = ['user_id', 'fcm_token'];
-    foreach ($required as $field) {
-        if (!isset($data[$field]) || $data[$field] === '' || $data[$field] === null) {
+    foreach (['user_id', 'fcm_token'] as $field) {
+        if (empty($data[$field])) {
             http_response_code(400);
-            echo json_encode(["status" => "error", "message" => "Missing parameter: $field"]);
+            echo json_encode(['status' => 'error', 'message' => "Missing parameter: $field"]);
             exit();
         }
     }
 
-    $user_id = intval($data['user_id']);
-    $fcm_token = $conn->real_escape_string(trim($data['fcm_token']));
-    $device_id = isset($data['device_id']) ? $conn->real_escape_string(trim($data['device_id'])) : null;
+    $user_id   = (int)$data['user_id'];
+    $fcm_token = trim($data['fcm_token']);
+    $device_id = isset($data['device_id']) ? trim($data['device_id']) : null;
 
     if (!$conn) {
         http_response_code(500);
-        echo json_encode(["status" => "error", "message" => "Database connection failed"]);
+        echo json_encode(['status' => 'error', 'message' => 'Database connection failed']);
         exit();
     }
 
-    // Ensure table exists (migration may not have been run)
+    // --- Check migration has been run ---
     $table_check = $conn->query("SHOW TABLES LIKE 'user_fcm_tokens'");
     if (!$table_check || $table_check->num_rows === 0) {
         http_response_code(500);
-        echo json_encode(["status" => "error", "message" => "Notification tables not installed. Run api/migrations/add_notification_tables.sql"]);
+        echo json_encode([
+            'status'  => 'error',
+            'message' => 'Notification tables not installed. Run migrations/add_notification_system.sql',
+        ]);
         exit();
     }
 
-    // Check user exists
-    $user_check = $conn->prepare("SELECT id FROM users WHERE id = ? AND status = 'active'");
-    $user_check->bind_param("i", $user_id);
+    // --- Validate user exists and is active ---
+    $user_check = $conn->prepare(
+        "SELECT id FROM users WHERE id = ? AND status = 'active'"
+    );
+    $user_check->bind_param('i', $user_id);
     $user_check->execute();
     if ($user_check->get_result()->num_rows === 0) {
         http_response_code(404);
-        echo json_encode(["status" => "error", "message" => "User not found or inactive"]);
+        echo json_encode(['status' => 'error', 'message' => 'User not found or inactive']);
         $user_check->close();
         exit();
     }
     $user_check->close();
 
-    // Upsert: insert or update on duplicate (user_id, fcm_token)
-    $stmt = $conn->prepare("INSERT INTO user_fcm_tokens (user_id, fcm_token, device_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP, device_id = COALESCE(VALUES(device_id), device_id)");
+    // --- If device_id provided, delete any OTHER token belonging to this device ---
+    // (same device might have rotated its FCM token; we keep only the latest)
+    if ($device_id !== null && $device_id !== '') {
+        $del = $conn->prepare(
+            "DELETE FROM user_fcm_tokens
+              WHERE user_id = ? AND device_id = ? AND fcm_token != ?"
+        );
+        $del->bind_param('iss', $user_id, $device_id, $fcm_token);
+        $del->execute();
+        $del->close();
+    }
+
+    // --- Check if is_active column exists (post-migration) ---
+    $hasActive = false;
+    $colCheck  = $conn->query("SHOW COLUMNS FROM user_fcm_tokens LIKE 'is_active'");
+    if ($colCheck && $colCheck->num_rows > 0) {
+        $hasActive = true;
+    }
+
+    // --- Upsert: insert or update timestamp + device_id + re-activate token ---
+    if ($hasActive) {
+        $stmt = $conn->prepare(
+            "INSERT INTO user_fcm_tokens (user_id, fcm_token, device_id, is_active)
+               VALUES (?, ?, ?, 1)
+             ON DUPLICATE KEY UPDATE
+               updated_at = CURRENT_TIMESTAMP,
+               device_id  = COALESCE(VALUES(device_id), device_id),
+               is_active  = 1"
+        );
+        $stmt->bind_param('iss', $user_id, $fcm_token, $device_id);
+    } else {
+        $stmt = $conn->prepare(
+            "INSERT INTO user_fcm_tokens (user_id, fcm_token, device_id)
+               VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+               updated_at = CURRENT_TIMESTAMP,
+               device_id  = COALESCE(VALUES(device_id), device_id)"
+        );
+        $stmt->bind_param('iss', $user_id, $fcm_token, $device_id);
+    }
+
     if (!$stmt) {
         http_response_code(500);
-        echo json_encode(["status" => "error", "message" => "Database error: " . $conn->error]);
+        echo json_encode(['status' => 'error', 'message' => 'Database error: ' . $conn->error]);
         exit();
     }
-    $stmt->bind_param("iss", $user_id, $fcm_token, $device_id);
 
-    if ($stmt->execute()) {
-        echo json_encode(["status" => "success", "message" => "FCM token registered"]);
-    } else {
+    if (!$stmt->execute()) {
         http_response_code(500);
-        echo json_encode(["status" => "error", "message" => "Failed to register token: " . $stmt->error]);
+        echo json_encode(['status' => 'error', 'message' => 'Failed to register token: ' . $stmt->error]);
+        $stmt->close();
+        exit();
     }
     $stmt->close();
+
+    // --- Return how many active devices this user has ---
+    $activeCol   = $hasActive ? "AND is_active = 1" : "";
+    $count_res   = $conn->query(
+        "SELECT COUNT(*) as c FROM user_fcm_tokens WHERE user_id = {$user_id} {$activeCol}"
+    );
+    $token_count = $count_res ? (int)$count_res->fetch_assoc()['c'] : 1;
+
+    echo json_encode([
+        'status'      => 'success',
+        'message'     => 'FCM token registered',
+        'token_count' => $token_count,
+    ]);
+
 } catch (Exception $e) {
     http_response_code(500);
-    echo json_encode(["status" => "error", "message" => "Server error: " . $e->getMessage()]);
+    echo json_encode(['status' => 'error', 'message' => 'Server error: ' . $e->getMessage()]);
 } finally {
     if (isset($conn) && $conn) {
         $conn->close();

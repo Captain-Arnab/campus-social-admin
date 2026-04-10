@@ -1,5 +1,6 @@
 <?php
 include 'db.php';
+require_once __DIR__ . '/sms_helper.php';
 $method = $_SERVER['REQUEST_METHOD'];
 
 // --- 1. GET EVENTS ---
@@ -374,7 +375,12 @@ elseif ($method == 'POST') {
             VALUES ('$title', '$desc', '$date', '$cat', '$venue', 'pending', $organizer_id, '$banners_json', '$rules')";
 
     if ($conn->query($sql)) {
-        echo json_encode(["status" => "success", "message" => "Event-ti admin-er approval-er jonyo pathano hoyechhe", "id" => $conn->insert_id]);
+        $new_id = (int) $conn->insert_id;
+        $title_for_sms = isset($_POST['title']) ? trim((string) $_POST['title']) : '';
+        if ($title_for_sms !== '') {
+            sms_notify_admins_event_created($conn, $title_for_sms);
+        }
+        echo json_encode(["status" => "success", "message" => "Event-ti admin-er approval-er jonyo pathano hoyechhe", "id" => $new_id]);
     } else {
         echo json_encode(["status" => "error", "message" => "Database error: " . $conn->error]);
     }
