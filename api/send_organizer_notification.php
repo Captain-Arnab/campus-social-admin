@@ -188,6 +188,7 @@ try {
     $sent           = $out['success'];
     $failed         = $out['failed'];
     $total_tokens   = count($tokens);
+    $errorSummary   = !empty($out['errors']) ? implode(' | ', array_slice($out['errors'], 0, 5)) : '';
 
     $msg_esc = $conn->real_escape_string($message);
     $conn->query(
@@ -210,6 +211,7 @@ try {
         'tokens_sent'     => $sent,
         'tokens_failed'   => $failed,
         'status'          => $log_status,
+        'error_message'   => $errorSummary,
     ]);
 
     echo json_encode([
@@ -221,6 +223,7 @@ try {
         'recipient_count'       => $sent,
         'daily_sends_used'      => $rate_count + 1,
         'daily_sends_remaining' => max(0, 10 - $rate_count - 1),
+        'error_details'         => $errorSummary ?: null,
     ]);
 } catch (Throwable $e) {
     if (!headers_sent()) {

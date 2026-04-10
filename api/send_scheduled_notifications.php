@@ -125,6 +125,7 @@ foreach ($celebrations as $cel) {
 
     $out    = fcm_send_to_tokens($allTokens, $title, $body, $fcmData);
     $status = determine_status($out['success'], $out['failed']);
+    $errSum = !empty($out['errors']) ? implode(' | ', array_slice($out['errors'], 0, 5)) : '';
 
     fcm_log_notification([
         'type'            => 'celebration',
@@ -137,6 +138,7 @@ foreach ($celebrations as $cel) {
         'tokens_sent'     => $out['success'],
         'tokens_failed'   => $out['failed'],
         'status'          => $status,
+        'error_message'   => $errSum,
     ]);
 
     $results[] = "celebration '{$cel['occasion_name']}': sent={$out['success']}, failed={$out['failed']}";
@@ -215,6 +217,7 @@ if ($schedCheck && $schedCheck->num_rows > 0) {
         }
 
         $status  = determine_status($out['success'], $out['failed']);
+        $snErrSum = !empty($out['errors']) ? implode(' | ', array_slice($out['errors'], 0, 5)) : '';
         $log_id  = fcm_log_notification([
             'type'            => 'scheduled',
             'ref_id'          => $sn_id,
@@ -227,6 +230,7 @@ if ($schedCheck && $schedCheck->num_rows > 0) {
             'tokens_sent'     => $out['success'],
             'tokens_failed'   => $out['failed'],
             'status'          => $status,
+            'error_message'   => $snErrSum,
         ]);
 
         // Link log entry back to the scheduled_notification row

@@ -242,18 +242,20 @@ function fcm_send_to_tokens(
     $success = 0;
     $failed  = 0;
     $invalid = [];
+    $errors  = [];
 
     foreach ($tokens as $token) {
         $sent    = false;
         $attempt = 0;
+        $lastRes = null;
 
         while ($attempt <= $maxRetries) {
             if ($attempt > 0) {
-                // Exponential back-off: 1 s, 2 s
                 sleep($attempt);
             }
 
-            $res = fcm_send_to_token($token, $title, $body, $data);
+            $res     = fcm_send_to_token($token, $title, $body, $data);
+            $lastRes = $res;
 
             if ($res['ok']) {
                 $sent = true;
@@ -261,18 +263,15 @@ function fcm_send_to_tokens(
             }
 
             if ($res['invalid_token']) {
-                // No point retrying — token is gone
                 $invalid[] = $token;
                 break;
             }
 
             if (!$res['retryable']) {
-                // Non-retryable error (auth, bad request, etc.)
-                error_log("[FCM] Non-retryable error for token={$token}: HTTP {$res['http_code']} — {$res['response']}");
+                error_log("[FCM] Non-retryable error for token=" . substr($token, 0, 20) . "…: HTTP {$res['http_code']} — {$res['response']}");
                 break;
             }
 
-            // Retryable: try again
             $attempt++;
         }
 
@@ -280,10 +279,21 @@ function fcm_send_to_tokens(
             $success++;
         } else {
             $failed++;
+            $shortToken = substr($token, 0, 12) . '…';
+            $errDetail  = "token={$shortToken} http={$lastRes['http_code']}";
+            if ($lastRes['invalid_token']) {
+                $errDetail .= ' INVALID/UNREGISTERED';
+            } elseif ($lastRes['response']) {
+                $decoded = json_decode($lastRes['response'], true);
+                $fcmErr  = $decoded['error']['message']
+                        ?? $decoded['error']['status']
+                        ?? substr($lastRes['response'], 0, 80);
+                $errDetail .= ' ' . $fcmErr;
+            }
+            $errors[] = $errDetail;
         }
     }
 
-    // Invalidate bad tokens in DB (best-effort; no fatal error if $conn unavailable)
     if (!empty($invalid)) {
         fcm_invalidate_tokens($invalid);
     }
@@ -292,6 +302,7 @@ function fcm_send_to_tokens(
         'success'        => $success,
         'failed'         => $failed,
         'invalid_tokens' => $invalid,
+        'errors'         => $errors,
     ];
 }
 
