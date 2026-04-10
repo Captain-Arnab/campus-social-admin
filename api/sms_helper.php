@@ -34,7 +34,7 @@ function sms_load_config() {
         'tmid' => getenv('SMS_GATEWAY_TMID') ?: '',
         'otp_message_template' => getenv('SMS_OTP_MESSAGE_TEMPLATE') ?:
             'Your OTP for MiCampus login is {OTP}. Please do not share this code with anyone. Valid for 10 minutes. Micampus.co.in',
-        'event_created_template_id' => getenv('SMS_EVENT_CREATED_TEMPLATE_ID') ?: '',
+        'event_created_template_id' => getenv('SMS_EVENT_CREATED_TEMPLATE_ID') ?: '1707177546592758639',
         'event_created_tmid' => getenv('SMS_EVENT_CREATED_TMID') ?: '',
         'event_created_message_template' => getenv('SMS_EVENT_CREATED_MESSAGE') ?:
             "A new event has been created successfully.\nEvent Name: {#var#}\nPlease login to the admin panel for more details.\n-Team MiCampus",
