@@ -11,9 +11,9 @@
  *  - Internal token cache   → avoids re-fetching OAuth2 token on same request
  */
 
-if (!defined('FCM_HELPER_LOADED')) {
-    require_once __DIR__ . '/firebase_config.php';
-}
+// Always load config (do not gate on FCM_HELPER_LOADED — callers may define that constant
+// before including this file, which previously skipped config and broke OAuth2/FCM).
+require_once __DIR__ . '/firebase_config.php';
 
 // ─── OAuth2 token (cached per PHP process) ───────────────────────────────────
 
@@ -432,17 +432,27 @@ function fcm_log_notification(array $params): ?int {
     }
 
     $type           = $params['type']            ?? 'unknown';
-    $ref_id         = isset($params['ref_id'])   ? (int)$params['ref_id']   : null;
-    $ref_date       = $params['ref_date']        ?? null;
+    // Bind as int; 0 when absent (avoids mysqli NULL quirks on some PHP builds)
+    $ref_id         = isset($params['ref_id']) && $params['ref_id'] !== null
+        ? (int) $params['ref_id']
+        : 0;
+    // NULL for SQL NULL on nullable DATE (avoid inserting '' into DATE)
+    $ref_date = isset($params['ref_date']) && $params['ref_date'] !== '' && $params['ref_date'] !== null
+        ? (string) $params['ref_date']
+        : null;
     $title          = $params['title']           ?? '';
     $body           = $params['body']            ?? '';
     $recipient_type = $params['recipient_type']  ?? 'all';
-    $event_id       = isset($params['event_id']) ? (int)$params['event_id'] : null;
-    $targeted       = (int)($params['tokens_targeted'] ?? 0);
-    $sent           = (int)($params['tokens_sent']     ?? 0);
-    $failed         = (int)($params['tokens_failed']   ?? 0);
+    $event_id       = isset($params['event_id']) && $params['event_id'] !== null
+        ? (int) $params['event_id']
+        : 0;
+    $targeted       = (int) ($params['tokens_targeted'] ?? 0);
+    $sent           = (int) ($params['tokens_sent'] ?? 0);
+    $failed         = (int) ($params['tokens_failed'] ?? 0);
     $status         = $params['status']          ?? 'sent';
-    $error_msg      = $params['error_message']   ?? null;
+    $error_msg      = isset($params['error_message']) && $params['error_message'] !== null
+        ? (string) $params['error_message']
+        : '';
 
     $stmt = $conn->prepare(
         "INSERT INTO notification_log
@@ -455,20 +465,35 @@ function fcm_log_notification(array $params): ?int {
         return null;
     }
 
+    // Exactly 12 types: s i s s s s i i i i s s
+    $types = 'sissssiiiiss';
+    if (strlen($types) !== 12) {
+        error_log('[FCM] notification_log bind_param type string length bug');
+        $stmt->close();
+        return null;
+    }
     $stmt->bind_param(
-        'siisssiiiiss',
-        $type, $ref_id, $ref_date, $title, $body,
-        $recipient_type, $event_id,
-        $targeted, $sent, $failed,
-        $status, $error_msg
+        $types,
+        $type,
+        $ref_id,
+        $ref_date,
+        $title,
+        $body,
+        $recipient_type,
+        $event_id,
+        $targeted,
+        $sent,
+        $failed,
+        $status,
+        $error_msg
     );
     if ($stmt->execute()) {
-        $id = (int)$stmt->insert_id;
+        $id = (int) $stmt->insert_id;
         $stmt->close();
         return $id;
     }
 
-    error_log('[FCM] notification_log insert failed: ' . $stmt->error);
+    error_log('[FCM] notification_log insert failed: ' . $stmt->error . ' | errno=' . $stmt->errno);
     $stmt->close();
     return null;
 }

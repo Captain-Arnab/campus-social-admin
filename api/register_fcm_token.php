@@ -122,7 +122,7 @@ try {
     $stmt->close();
 
     // --- Return how many active devices this user has ---
-    $activeCol   = $hasActive ? "AND is_active = 1" : "";
+    $activeCol   = $hasActive ? "AND (is_active = 1 OR is_active IS NULL)" : "";
     $count_res   = $conn->query(
         "SELECT COUNT(*) as c FROM user_fcm_tokens WHERE user_id = {$user_id} {$activeCol}"
     );

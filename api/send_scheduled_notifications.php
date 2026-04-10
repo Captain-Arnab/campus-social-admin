@@ -38,7 +38,6 @@
 
 date_default_timezone_set('Asia/Kolkata');
 
-define('FCM_HELPER_LOADED', true);
 require_once __DIR__ . '/fcm_helper.php';
 require_once __DIR__ . '/db.php';
 
@@ -57,7 +56,7 @@ $colCheck   = $conn->query("SHOW COLUMNS FROM user_fcm_tokens LIKE 'is_active'")
 if ($colCheck && $colCheck->num_rows > 0) {
     $hasActive = true;
 }
-$activeFilter = $hasActive ? " AND is_active = 1" : "";
+$activeFilter = $hasActive ? " AND (is_active = 1 OR is_active IS NULL)" : "";
 
 // ─── Fetch ALL active FCM tokens (for broadcast notifications) ────────────────
 $tres      = $conn->query(
@@ -305,7 +304,7 @@ function already_sent(string $type, int $ref_id, string $ref_date, mysqli $conn)
  * @param string   $recipient_type  all|students|faculty|event_participants|event_volunteers|event_both
  * @param int|null $event_id
  * @param mysqli   $conn
- * @param string   $activeFilter    SQL fragment " AND is_active = 1" or ""
+ * @param string   $activeFilter    SQL fragment excluding is_active = 0 only
  * @return string[]
  */
 function get_tokens_for_recipient(
