@@ -23,8 +23,9 @@ if ($event_id <= 0 || $user_id <= 0 || !in_array($type, ['participant', 'volunte
 }
 
 // E-certificates only for past events
-$ev = $conn->query("SELECT event_date FROM events WHERE id = $event_id")->fetch_assoc();
-if (!$ev || strtotime($ev['event_date']) >= time()) {
+require_once __DIR__ . '/event_date_range_schema.php';
+$ev = $conn->query('SELECT event_date, event_end_date FROM events WHERE id = ' . (int) $event_id)->fetch_assoc();
+if (!$ev || !events_row_is_fully_past($ev)) {
     echo json_encode(['status' => 'error', 'message' => 'E-certificates can only be uploaded for past events']);
     exit();
 }

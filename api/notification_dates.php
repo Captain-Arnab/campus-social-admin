@@ -88,11 +88,23 @@ try {
         }
 
         if ($include_events) {
-            $estmt = $conn->prepare(
-                'SELECT id, title, event_date, venue FROM events WHERE status = \'approved\' AND DATE(event_date) >= ? ORDER BY event_date ASC LIMIT 100'
-            );
+            require_once __DIR__ . '/../event_date_range_schema.php';
+            if (schema_events_has_event_end_date($conn)) {
+                $estmt = $conn->prepare(
+                    'SELECT id, title, event_date, event_end_date, venue FROM events WHERE status = \'approved\' AND (DATE(event_date) >= ? OR (event_end_date IS NOT NULL AND DATE(event_end_date) >= ?)) ORDER BY event_date ASC LIMIT 100'
+                );
+                if ($estmt) {
+                    $estmt->bind_param('ss', $from, $from);
+                }
+            } else {
+                $estmt = $conn->prepare(
+                    'SELECT id, title, event_date, venue FROM events WHERE status = \'approved\' AND DATE(event_date) >= ? ORDER BY event_date ASC LIMIT 100'
+                );
+                if ($estmt) {
+                    $estmt->bind_param('s', $from);
+                }
+            }
             if ($estmt) {
-                $estmt->bind_param('s', $from);
                 $estmt->execute();
                 $eres = $estmt->get_result();
                 while ($erow = $eres->fetch_assoc()) {
@@ -100,7 +112,7 @@ try {
                     if ($to !== '' && strcmp($ed, $to) > 0) {
                         continue;
                     }
-                    $dates[] = [
+                    $rowOut = [
                         'id' => 'e' . $erow['id'],
                         'event_id' => (int) $erow['id'],
                         'notify_date' => $ed,
@@ -109,6 +121,10 @@ try {
                         'event_title' => $erow['title'],
                         'source' => 'event',
                     ];
+                    if (!empty($erow['event_end_date']) && ($erow['event_end_date'] ?? '') !== '0000-00-00 00:00:00') {
+                        $rowOut['event_end_date'] = date('Y-m-d', strtotime($erow['event_end_date']));
+                    }
+                    $dates[] = $rowOut;
                 }
                 $estmt->close();
             }

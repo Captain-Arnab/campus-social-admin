@@ -2,6 +2,7 @@
 session_start();
 include 'db.php';
 require_once __DIR__ . '/admin_priv.php';
+require_once __DIR__ . '/event_date_range_schema.php';
 
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     header("Location: index.php");
@@ -36,31 +37,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $category = trim($_POST['category'] ?? '');
     $venue = trim($_POST['venue'] ?? '');
     $event_date = trim($_POST['event_date'] ?? '');
+    $event_end_date = trim($_POST['event_end_date'] ?? '');
     $description = trim($_POST['description'] ?? '');
     $rules = trim($_POST['rules'] ?? '');
 
     if ($title === '') $errors[] = "Title is required";
     if ($category === '') $errors[] = "Category is required";
     if ($venue === '') $errors[] = "Venue is required";
-    if ($event_date === '') $errors[] = "Event date/time is required";
+    if ($event_date === '') $errors[] = "Event start date/time is required";
 
     // Basic date validation (expects HTML datetime-local format)
     $event_date_mysql = null;
+    $event_end_mysql   = null;
     if ($event_date !== '') {
         $dt = DateTime::createFromFormat('Y-m-d\TH:i', $event_date);
         if (!$dt) {
-            $errors[] = "Invalid date/time format";
+            $errors[] = "Invalid start date/time format";
         } else {
             $event_date_mysql = $dt->format('Y-m-d H:i:s');
         }
+    }
+    if ($event_end_date !== '') {
+        $dtEnd = DateTime::createFromFormat('Y-m-d\TH:i', $event_end_date);
+        if (!$dtEnd) {
+            $errors[] = "Invalid end date/time format";
+        } else {
+            $event_end_mysql = $dtEnd->format('Y-m-d H:i:s');
+        }
+    }
+    if ($event_date_mysql && $event_end_mysql && strtotime($event_end_mysql) < strtotime($event_date_mysql)) {
+        $errors[] = "End date/time must be on or after the start";
     }
 
     if (empty($errors)) {
         $old_status = $event['status'];
 
         // Admin can edit event details anytime (any status)
-        $upd = $conn->prepare("UPDATE events SET title = ?, category = ?, venue = ?, event_date = ?, description = ?, rules = ? WHERE id = ?");
-        $upd->bind_param("ssssssi", $title, $category, $venue, $event_date_mysql, $description, $rules, $id);
+        if (schema_events_has_event_end_date($conn)) {
+            if ($event_end_mysql === null) {
+                $upd = $conn->prepare('UPDATE events SET title = ?, category = ?, venue = ?, event_date = ?, event_end_date = NULL, description = ?, rules = ? WHERE id = ?');
+                $upd->bind_param('ssssssi', $title, $category, $venue, $event_date_mysql, $description, $rules, $id);
+            } else {
+                $upd = $conn->prepare('UPDATE events SET title = ?, category = ?, venue = ?, event_date = ?, event_end_date = ?, description = ?, rules = ? WHERE id = ?');
+                $upd->bind_param('sssssssi', $title, $category, $venue, $event_date_mysql, $event_end_mysql, $description, $rules, $id);
+            }
+        } else {
+            $upd = $conn->prepare("UPDATE events SET title = ?, category = ?, venue = ?, event_date = ?, description = ?, rules = ? WHERE id = ?");
+            $upd->bind_param("ssssssi", $title, $category, $venue, $event_date_mysql, $description, $rules, $id);
+        }
 
         if ($upd->execute() && $upd->affected_rows >= 0) {
             $upd->close();
@@ -85,12 +109,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Prefill form values
 $dt_prefill = '';
+$dt_end_prefill = '';
 try {
     if (!empty($event['event_date'])) {
         $dt_prefill = (new DateTime($event['event_date']))->format('Y-m-d\TH:i');
     }
+    if (!empty($event['event_end_date']) && ($event['event_end_date'] ?? '') !== '0000-00-00 00:00:00') {
+        $dt_end_prefill = (new DateTime($event['event_end_date']))->format('Y-m-d\TH:i');
+    }
 } catch (Exception $e) {
     $dt_prefill = '';
+    $dt_end_prefill = '';
 }
 
 $banners = json_decode($event['banners'] ?? '[]');
@@ -178,8 +207,12 @@ $banners = json_decode($event['banners'] ?? '[]');
                             <input type="text" name="venue" class="form-control" value="<?php echo htmlspecialchars($_POST['venue'] ?? $event['venue']); ?>" required>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label fw-bold small">Event Date & Time</label>
+                            <label class="form-label fw-bold small">Starts (from)</label>
                             <input type="datetime-local" name="event_date" class="form-control" value="<?php echo htmlspecialchars($_POST['event_date'] ?? $dt_prefill); ?>" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small">Ends (to) <span class="text-muted fw-normal">— optional</span></label>
+                            <input type="datetime-local" name="event_end_date" class="form-control" value="<?php echo htmlspecialchars($_POST['event_end_date'] ?? $dt_end_prefill); ?>">
                         </div>
                         <div class="col-12">
                             <label class="form-label fw-bold small">Description</label>

@@ -1,6 +1,7 @@
 <?php
 include 'db.php';
 require_once __DIR__ . '/sms_helper.php';
+require_once __DIR__ . '/../event_date_range_schema.php';
 $method = $_SERVER['REQUEST_METHOD'];
 
 // --- 1. GET EVENTS ---
@@ -131,9 +132,9 @@ if ($method == 'GET') {
         $sql .= " AND e.status = 'approved'";
 
         if ($view == 'past') {
-            $sql .= " AND e.event_date < NOW()";
+            $sql .= ' AND ' . events_sql_past($conn, 'e');
         } else {
-            $sql .= " AND e.event_date >= NOW()";
+            $sql .= ' AND ' . events_sql_not_past($conn, 'e');
         }
 
         if (!empty($search_query)) {
@@ -188,6 +189,9 @@ if ($method == 'GET') {
             // Pending edit (when event has editors, organizer/editor edits await admin approval)
             $row['pending_edit'] = null;
             $pe_cols = "title, description, venue, event_date, category, submitted_by_user_id, submitted_at";
+            if (schema_event_pending_edits_has_event_end_date($conn)) {
+                $pe_cols = "title, description, venue, event_date, event_end_date, category, submitted_by_user_id, submitted_at";
+            }
             $has_banners = @$conn->query("SHOW COLUMNS FROM event_pending_edits LIKE 'banners'");
             if ($has_banners && $has_banners->num_rows > 0) {
                 $pe_cols .= ", banners";
@@ -219,7 +223,12 @@ elseif ($method == 'POST') {
         // --- UPDATE EVENT (same fields as create: title, description, event_date, category, venue, optional banners) ---
         $id = intval($_POST['event_id']);
         $user_id = intval($_POST['user_id']);
-        $check = $conn->prepare("SELECT id, organizer_id, status, title, description, venue, event_date, category, banners, rules FROM events WHERE id = ?");
+        $evSelect = "SELECT id, organizer_id, status, title, description, venue, event_date, category, banners, rules";
+        if (schema_events_has_event_end_date($conn)) {
+            $evSelect .= ", event_end_date";
+        }
+        $evSelect .= " FROM events WHERE id = ?";
+        $check = $conn->prepare($evSelect);
         $check->bind_param("i", $id);
         $check->execute();
         $evt = $check->get_result()->fetch_assoc();
@@ -247,14 +256,27 @@ elseif ($method == 'POST') {
         $title = isset($_POST['title']) ? $conn->real_escape_string($_POST['title']) : $evt['title'];
         $desc = isset($_POST['description']) ? $conn->real_escape_string($_POST['description']) : $evt['description'];
         $venue = isset($_POST['venue']) ? $conn->real_escape_string($_POST['venue']) : $evt['venue'];
-        $event_date_raw = isset($_POST['event_date']) && $_POST['event_date'] !== '' ? $_POST['event_date'] : null;
-        if ($event_date_raw !== null) {
-            $event_date_raw = str_replace('T', ' ', $event_date_raw);
-            if (strlen($event_date_raw) === 16) {
-                $event_date_raw .= ':00';
-            }
+        $start_raw = events_parse_start_from_request($_POST, 'event_date');
+        if ($start_raw === null) {
+            $start_raw = events_normalize_dt((string) ($evt['event_date'] ?? ''));
         }
-        $event_date = $event_date_raw !== null ? $conn->real_escape_string($event_date_raw) : $evt['event_date'];
+        $posted_end_keys = array_key_exists('event_end_date', $_POST)
+            || array_key_exists('event_date_to', $_POST)
+            || array_key_exists('event_date_end', $_POST);
+        if ($posted_end_keys) {
+            $end_raw = events_parse_end_from_request($_POST);
+        } elseif (schema_events_has_event_end_date($conn) && !empty($evt['event_end_date']) && ($evt['event_end_date'] ?? '') !== '0000-00-00 00:00:00') {
+            $end_raw = events_normalize_dt((string) $evt['event_end_date']);
+        } else {
+            $end_raw = null;
+        }
+        if (!events_validate_end_after_start((string) $start_raw, $end_raw)) {
+            echo json_encode(["status" => "error", "message" => "Event end date/time must be on or after the start date/time"]);
+            exit();
+        }
+        $event_date     = $start_raw;
+        $event_date_esc = $conn->real_escape_string((string) $start_raw);
+        $post_end_bind  = $end_raw;
         $category = isset($_POST['category']) ? $conn->real_escape_string($_POST['category']) : $evt['category'];
         $image_paths = [];
         if (isset($_FILES['banners']) && !empty($_FILES['banners']['tmp_name'][0])) {
@@ -280,59 +302,89 @@ elseif ($method == 'POST') {
         $needs_approval = ($event_has_editors && $evt['status'] === 'approved');
 
         if ($needs_approval) {
+            $hasPeEnd = schema_event_pending_edits_has_event_end_date($conn);
+            $ebe      = $post_end_bind;
             $has_banners_col = @$conn->query("SHOW COLUMNS FROM event_pending_edits LIKE 'banners'");
             $has_banners_col = $has_banners_col && $has_banners_col->num_rows > 0;
             $has_rules_col = @$conn->query("SHOW COLUMNS FROM event_pending_edits LIKE 'rules'");
             $has_rules_col = $has_rules_col && $has_rules_col->num_rows > 0;
             if ($has_banners_col && $has_rules_col) {
-                $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, category, banners, rules, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), category=VALUES(category), banners=VALUES(banners), rules=VALUES(rules), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
-                if ($stmt) {
-                    $stmt->bind_param("isssssssi", $id, $title, $desc, $venue, $event_date, $category, $banners_json, $rules_upd, $user_id);
-                    if ($stmt->execute()) {
-                        $stmt->close();
-                        echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
-                    } else {
-                        $stmt->close();
-                        echo json_encode(["status" => "error", "message" => $conn->error]);
+                if ($hasPeEnd) {
+                    $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, event_end_date, category, banners, rules, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), event_end_date=VALUES(event_end_date), category=VALUES(category), banners=VALUES(banners), rules=VALUES(rules), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
+                    if ($stmt) {
+                        $stmt->bind_param("issssssssi", $id, $title, $desc, $venue, $event_date, $ebe, $category, $banners_json, $rules_upd, $user_id);
                     }
-                    exit();
-                }
-            }
-            if ($has_banners_col) {
-                $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, category, banners, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), category=VALUES(category), banners=VALUES(banners), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
-                if ($stmt) {
-                    $stmt->bind_param("issssssi", $id, $title, $desc, $venue, $event_date, $category, $banners_json, $user_id);
-                    if ($stmt->execute()) {
-                        $stmt->close();
-                        echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
-                    } else {
-                        $stmt->close();
-                        echo json_encode(["status" => "error", "message" => $conn->error]);
+                } else {
+                    $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, category, banners, rules, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), category=VALUES(category), banners=VALUES(banners), rules=VALUES(rules), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
+                    if ($stmt) {
+                        $stmt->bind_param("isssssssi", $id, $title, $desc, $venue, $event_date, $category, $banners_json, $rules_upd, $user_id);
                     }
-                    exit();
                 }
-            }
-            $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, category, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), category=VALUES(category), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
-            if ($stmt) {
-                $stmt->bind_param("isssssi", $id, $title, $desc, $venue, $event_date, $category, $user_id);
-                if ($stmt->execute()) {
+                if ($stmt && $stmt->execute()) {
                     $stmt->close();
                     echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
-                } else {
+                } elseif ($stmt) {
                     $stmt->close();
                     echo json_encode(["status" => "error", "message" => $conn->error]);
                 }
                 exit();
             }
+            if ($has_banners_col) {
+                if ($hasPeEnd) {
+                    $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, event_end_date, category, banners, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), event_end_date=VALUES(event_end_date), category=VALUES(category), banners=VALUES(banners), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
+                    if ($stmt) {
+                        $stmt->bind_param("isssssssi", $id, $title, $desc, $venue, $event_date, $ebe, $category, $banners_json, $user_id);
+                    }
+                } else {
+                    $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, category, banners, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), category=VALUES(category), banners=VALUES(banners), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
+                    if ($stmt) {
+                        $stmt->bind_param("issssssi", $id, $title, $desc, $venue, $event_date, $category, $banners_json, $user_id);
+                    }
+                }
+                if ($stmt && $stmt->execute()) {
+                    $stmt->close();
+                    echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
+                } elseif ($stmt) {
+                    $stmt->close();
+                    echo json_encode(["status" => "error", "message" => $conn->error]);
+                }
+                exit();
+            }
+            if ($hasPeEnd) {
+                $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, event_end_date, category, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), event_end_date=VALUES(event_end_date), category=VALUES(category), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
+                if ($stmt) {
+                    $stmt->bind_param("issssssi", $id, $title, $desc, $venue, $event_date, $ebe, $category, $user_id);
+                }
+            } else {
+                $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, category, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), category=VALUES(category), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
+                if ($stmt) {
+                    $stmt->bind_param("isssssi", $id, $title, $desc, $venue, $event_date, $category, $user_id);
+                }
+            }
+            if ($stmt && $stmt->execute()) {
+                $stmt->close();
+                echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
+            } elseif ($stmt) {
+                $stmt->close();
+                echo json_encode(["status" => "error", "message" => $conn->error]);
+            }
+            exit();
         }
         $banners_esc = $conn->real_escape_string($banners_json);
-        $event_date_esc = $conn->real_escape_string($event_date);
         $title_esc = $conn->real_escape_string($title);
         $desc_esc = $conn->real_escape_string($desc);
         $venue_esc = $conn->real_escape_string($venue);
         $category_esc = $conn->real_escape_string($category);
         $rules_esc = $conn->real_escape_string($rules_upd);
-        $sql = "UPDATE events SET title='$title_esc', description='$desc_esc', venue='$venue_esc', event_date='$event_date_esc', category='$category_esc', banners='$banners_esc', rules='$rules_esc' WHERE id=$id";
+        $end_sql_fragment = '';
+        if (schema_events_has_event_end_date($conn)) {
+            if ($post_end_bind === null || $post_end_bind === '') {
+                $end_sql_fragment = ', event_end_date = NULL';
+            } else {
+                $end_sql_fragment = ", event_end_date = '" . $conn->real_escape_string((string) $post_end_bind) . "'";
+            }
+        }
+        $sql = "UPDATE events SET title='$title_esc', description='$desc_esc', venue='$venue_esc', event_date='$event_date_esc'{$end_sql_fragment}, category='$category_esc', banners='$banners_esc', rules='$rules_esc' WHERE id=$id";
         if ($conn->query($sql)) {
             echo json_encode(["status" => "success", "message" => "Event updated"]);
         } else {
@@ -347,11 +399,26 @@ elseif ($method == 'POST') {
         exit();
     }
 
-    $title = $conn->real_escape_string($_POST['title']);
+    $title_plain = isset($_POST['title']) ? trim((string) $_POST['title']) : '';
+    $cat_plain   = isset($_POST['category']) ? trim((string) $_POST['category']) : '';
+    $venue_plain = isset($_POST['venue']) ? trim((string) $_POST['venue']) : '';
+
+    $start_raw = events_parse_start_from_request($_POST, 'event_date');
+    if ($start_raw === null) {
+        echo json_encode(["status" => "error", "message" => "Event start date/time is required (event_date or event_date_from)"]);
+        exit();
+    }
+    $end_raw = events_parse_end_from_request($_POST);
+    if (!events_validate_end_after_start($start_raw, $end_raw)) {
+        echo json_encode(["status" => "error", "message" => "Event end date/time must be on or after the start"]);
+        exit();
+    }
+
+    $title = $conn->real_escape_string($title_plain);
     $desc = $conn->real_escape_string($_POST['description'] ?? '');
-    $date = $conn->real_escape_string($_POST['event_date']);
-    $cat = $conn->real_escape_string($_POST['category']);
-    $venue = $conn->real_escape_string($_POST['venue']);
+    $date_esc = $conn->real_escape_string($start_raw);
+    $cat = $conn->real_escape_string($cat_plain);
+    $venue = $conn->real_escape_string($venue_plain);
     $rules = $conn->real_escape_string($_POST['rules'] ?? '');
     $organizer_id = intval($_POST['user_id']);
 
@@ -371,14 +438,36 @@ elseif ($method == 'POST') {
     }
     $banners_json = json_encode($image_paths);
 
-    $sql = "INSERT INTO events (title, description, event_date, category, venue, status, organizer_id, banners, rules) 
-            VALUES ('$title', '$desc', '$date', '$cat', '$venue', 'pending', $organizer_id, '$banners_json', '$rules')";
+    if (schema_events_has_event_end_date($conn)) {
+        if ($end_raw === null || $end_raw === '') {
+            $sql = "INSERT INTO events (title, description, event_date, event_end_date, category, venue, status, organizer_id, banners, rules) 
+            VALUES ('$title', '$desc', '$date_esc', NULL, '$cat', '$venue', 'pending', $organizer_id, '$banners_json', '$rules')";
+        } else {
+            $end_esc = $conn->real_escape_string($end_raw);
+            $sql = "INSERT INTO events (title, description, event_date, event_end_date, category, venue, status, organizer_id, banners, rules) 
+            VALUES ('$title', '$desc', '$date_esc', '$end_esc', '$cat', '$venue', 'pending', $organizer_id, '$banners_json', '$rules')";
+        }
+    } else {
+        $sql = "INSERT INTO events (title, description, event_date, category, venue, status, organizer_id, banners, rules) 
+            VALUES ('$title', '$desc', '$date_esc', '$cat', '$venue', 'pending', $organizer_id, '$banners_json', '$rules')";
+    }
 
     if ($conn->query($sql)) {
         $new_id = (int) $conn->insert_id;
-        $title_for_sms = isset($_POST['title']) ? trim((string) $_POST['title']) : '';
+        $title_for_sms = $title_plain;
         if ($title_for_sms !== '') {
             sms_notify_admins_event_created($conn, $title_for_sms);
+        }
+        if ($new_id > 0) {
+            $inbox_helper = __DIR__ . '/app_inbox_notifications_helper.php';
+            if (is_readable($inbox_helper)) {
+                require_once $inbox_helper;
+                try {
+                    campus_inbox_after_event_created($conn, $new_id, $title_plain, $cat_plain, $venue_plain);
+                } catch (Throwable $e) {
+                    error_log('[events.php] campus_inbox_after_event_created: ' . $e->getMessage());
+                }
+            }
         }
         echo json_encode(["status" => "success", "message" => "Event-ti admin-er approval-er jonyo pathano hoyechhe", "id" => $new_id]);
     } else {
@@ -399,7 +488,12 @@ elseif ($method == 'PUT') {
     $id = intval($data['id']);
     $user_id = intval($data['user_id']);
     
-    $check = $conn->prepare("SELECT id, organizer_id, status, title, description, venue, event_date, category, banners, rules FROM events WHERE id = ?");
+    $evSelectPut = "SELECT id, organizer_id, status, title, description, venue, event_date, category, banners, rules";
+    if (schema_events_has_event_end_date($conn)) {
+        $evSelectPut .= ", event_end_date";
+    }
+    $evSelectPut .= " FROM events WHERE id = ?";
+    $check = $conn->prepare($evSelectPut);
     $check->bind_param("i", $id);
     $check->execute();
     $evt = $check->get_result()->fetch_assoc();
@@ -428,14 +522,29 @@ elseif ($method == 'PUT') {
     $title = array_key_exists('title', $data) ? $conn->real_escape_string($data['title']) : $evt['title'];
     $desc = array_key_exists('description', $data) ? $conn->real_escape_string($data['description']) : $evt['description'];
     $venue = array_key_exists('venue', $data) ? $conn->real_escape_string($data['venue']) : $evt['venue'];
-    $event_date_raw = array_key_exists('event_date', $data) && $data['event_date'] !== '' && $data['event_date'] !== null ? $data['event_date'] : null;
-    if ($event_date_raw !== null) {
-        $event_date_raw = str_replace('T', ' ', $event_date_raw);
-        if (strlen($event_date_raw) === 16) {
-            $event_date_raw .= ':00';
-        }
+    $start_raw = (array_key_exists('event_date', $data) || array_key_exists('event_date_from', $data))
+        ? events_parse_start_from_request($data, 'event_date')
+        : null;
+    if ($start_raw === null) {
+        $start_raw = events_normalize_dt((string) ($evt['event_date'] ?? ''));
     }
-    $event_date = $event_date_raw !== null ? $conn->real_escape_string($event_date_raw) : $evt['event_date'];
+    $posted_end_put = array_key_exists('event_end_date', $data)
+        || array_key_exists('event_date_to', $data)
+        || array_key_exists('event_date_end', $data);
+    if ($posted_end_put) {
+        $end_raw = events_parse_end_from_request($data);
+    } elseif (schema_events_has_event_end_date($conn) && !empty($evt['event_end_date']) && ($evt['event_end_date'] ?? '') !== '0000-00-00 00:00:00') {
+        $end_raw = events_normalize_dt((string) $evt['event_end_date']);
+    } else {
+        $end_raw = null;
+    }
+    if (!events_validate_end_after_start((string) $start_raw, $end_raw)) {
+        echo json_encode(["status" => "error", "message" => "Event end date/time must be on or after the start date/time"]);
+        exit();
+    }
+    $event_date     = $start_raw;
+    $event_date_esc = $conn->real_escape_string((string) $start_raw);
+    $post_end_bind  = $end_raw;
     $category = array_key_exists('category', $data) ? $conn->real_escape_string($data['category']) : $evt['category'];
     $rules = array_key_exists('rules', $data) ? (string) $data['rules'] : (string) ($evt['rules'] ?? '');
     // Banners in PUT: optional JSON array of filenames (client can replace with new list; no file upload in PUT)
@@ -452,59 +561,86 @@ elseif ($method == 'PUT') {
     $needs_approval = ($event_has_editors && $evt['status'] === 'approved');
 
     if ($needs_approval) {
-        // Save to pending_edits; admin will approve or reject
+        $hasPeEnd = schema_event_pending_edits_has_event_end_date($conn);
+        $ebe      = $post_end_bind;
         $has_banners_col = @$conn->query("SHOW COLUMNS FROM event_pending_edits LIKE 'banners'");
         $has_banners_col = $has_banners_col && $has_banners_col->num_rows > 0;
         $has_rules_col = @$conn->query("SHOW COLUMNS FROM event_pending_edits LIKE 'rules'");
         $has_rules_col = $has_rules_col && $has_rules_col->num_rows > 0;
         if ($has_banners_col && $has_rules_col) {
-            $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, category, banners, rules, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), category=VALUES(category), banners=VALUES(banners), rules=VALUES(rules), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
-            if ($stmt) {
-                $stmt->bind_param("isssssssi", $id, $title, $desc, $venue, $event_date, $category, $banners_json, $rules, $user_id);
-                if ($stmt->execute()) {
-                    $stmt->close();
-                    echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
-                } else {
-                    $stmt->close();
-                    echo json_encode(["status" => "error", "message" => $conn->error]);
+            if ($hasPeEnd) {
+                $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, event_end_date, category, banners, rules, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), event_end_date=VALUES(event_end_date), category=VALUES(category), banners=VALUES(banners), rules=VALUES(rules), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
+                if ($stmt) {
+                    $stmt->bind_param("issssssssi", $id, $title, $desc, $venue, $event_date, $ebe, $category, $banners_json, $rules, $user_id);
                 }
-                exit();
-            }
-        }
-        if ($has_banners_col) {
-            $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, category, banners, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), category=VALUES(category), banners=VALUES(banners), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
-            if ($stmt) {
-                $stmt->bind_param("issssssi", $id, $title, $desc, $venue, $event_date, $category, $banners_json, $user_id);
-                if ($stmt->execute()) {
-                    $stmt->close();
-                    echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
-                } else {
-                    $stmt->close();
-                    echo json_encode(["status" => "error", "message" => $conn->error]);
+            } else {
+                $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, category, banners, rules, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), category=VALUES(category), banners=VALUES(banners), rules=VALUES(rules), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
+                if ($stmt) {
+                    $stmt->bind_param("isssssssi", $id, $title, $desc, $venue, $event_date, $category, $banners_json, $rules, $user_id);
                 }
-                exit();
             }
-        }
-        $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, category, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), category=VALUES(category), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
-        if (!$stmt) {
-            echo json_encode(["status" => "error", "message" => "Database error"]);
+            if ($stmt && $stmt->execute()) {
+                $stmt->close();
+                echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
+            } elseif ($stmt) {
+                $stmt->close();
+                echo json_encode(["status" => "error", "message" => $conn->error]);
+            }
             exit();
         }
-        $stmt->bind_param("isssssi", $id, $title, $desc, $venue, $event_date, $category, $user_id);
-        if ($stmt->execute()) {
+        if ($has_banners_col) {
+            if ($hasPeEnd) {
+                $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, event_end_date, category, banners, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), event_end_date=VALUES(event_end_date), category=VALUES(category), banners=VALUES(banners), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
+                if ($stmt) {
+                    $stmt->bind_param("isssssssi", $id, $title, $desc, $venue, $event_date, $ebe, $category, $banners_json, $user_id);
+                }
+            } else {
+                $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, category, banners, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), category=VALUES(category), banners=VALUES(banners), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
+                if ($stmt) {
+                    $stmt->bind_param("issssssi", $id, $title, $desc, $venue, $event_date, $category, $banners_json, $user_id);
+                }
+            }
+            if ($stmt && $stmt->execute()) {
+                $stmt->close();
+                echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
+            } elseif ($stmt) {
+                $stmt->close();
+                echo json_encode(["status" => "error", "message" => $conn->error]);
+            }
+            exit();
+        }
+        if ($hasPeEnd) {
+            $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, event_end_date, category, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), event_end_date=VALUES(event_end_date), category=VALUES(category), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
+            if ($stmt) {
+                $stmt->bind_param("issssssi", $id, $title, $desc, $venue, $event_date, $ebe, $category, $user_id);
+            }
+        } else {
+            $stmt = $conn->prepare("INSERT INTO event_pending_edits (event_id, title, description, venue, event_date, category, submitted_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), venue=VALUES(venue), event_date=VALUES(event_date), category=VALUES(category), submitted_by_user_id=VALUES(submitted_by_user_id), submitted_at=CURRENT_TIMESTAMP");
+            if ($stmt) {
+                $stmt->bind_param("isssssi", $id, $title, $desc, $venue, $event_date, $category, $user_id);
+            }
+        }
+        if ($stmt && $stmt->execute()) {
             $stmt->close();
             echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
-        } else {
+        } elseif ($stmt) {
             $stmt->close();
             echo json_encode(["status" => "error", "message" => $conn->error]);
         }
         exit();
     }
-    
+
     $banners_esc = $conn->real_escape_string($banners_json);
-    $event_date_esc = $conn->real_escape_string($event_date);
     $rules_esc = $conn->real_escape_string($rules);
-    $sql = "UPDATE events SET title='$title', description='$desc', venue='$venue', event_date='$event_date_esc', category='$category', banners='$banners_esc', rules='$rules_esc' WHERE id=$id";
+    $end_sql_put = '';
+    if (schema_events_has_event_end_date($conn)) {
+        if ($post_end_bind === null || $post_end_bind === '') {
+            $end_sql_put = ', event_end_date = NULL';
+        } else {
+            $end_sql_put = ", event_end_date = '" . $conn->real_escape_string((string) $post_end_bind) . "'";
+        }
+    }
+    $sql = "UPDATE events SET title='$title', description='$desc', venue='$venue', event_date='$event_date_esc'{$end_sql_put}, category='$category', banners='$banners_esc', rules='$rules_esc' WHERE id=$id";
 
     if ($conn->query($sql)) {
         echo json_encode(["status" => "success", "message" => "Event updated"]);

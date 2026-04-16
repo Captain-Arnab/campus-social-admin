@@ -2,6 +2,7 @@
 session_start();
 include 'db.php';
 require_once __DIR__ . '/admin_priv.php';
+require_once __DIR__ . '/event_date_range_schema.php';
 header('Content-Type: application/json');
 
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
@@ -23,12 +24,12 @@ if ($event_id <= 0) {
 }
 
 // Only past events: winner selection allowed only after event date
-$ev = $conn->query("SELECT event_date FROM events WHERE id = $event_id")->fetch_assoc();
+$ev = $conn->query("SELECT event_date, event_end_date FROM events WHERE id = $event_id")->fetch_assoc();
 if (!$ev) {
     echo json_encode(['status' => 'error', 'message' => 'Event not found']);
     exit();
 }
-if (strtotime($ev['event_date']) >= time()) {
+if (!events_row_is_fully_past($ev)) {
     echo json_encode(['status' => 'error', 'message' => 'Winners can only be selected for past events']);
     exit();
 }

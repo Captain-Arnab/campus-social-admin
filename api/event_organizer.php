@@ -5,6 +5,7 @@
  */
 header('Content-Type: application/json');
 include 'db.php';
+require_once __DIR__ . '/../event_date_range_schema.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
@@ -30,7 +31,12 @@ if ($event_id <= 0 || $organizer_id <= 0) {
     exit();
 }
 
-$ev = $conn->prepare('SELECT id, organizer_id, event_date FROM events WHERE id = ?');
+$evCols = 'SELECT id, organizer_id, event_date';
+if (schema_events_has_event_end_date($conn)) {
+    $evCols .= ', event_end_date';
+}
+$evCols .= ' FROM events WHERE id = ?';
+$ev = $conn->prepare($evCols);
 $ev->bind_param('i', $event_id);
 $ev->execute();
 $er = $ev->get_result()->fetch_assoc();
@@ -42,11 +48,9 @@ if (!$er || (int) $er['organizer_id'] !== $organizer_id) {
     exit();
 }
 
-$event_day = date('Y-m-d', strtotime($er['event_date']));
-$today = date('Y-m-d');
-if ($today < $event_day) {
+if (!events_row_organizer_actions_allowed($er)) {
     http_response_code(400);
-    echo json_encode(['status' => 'error', 'message' => 'Review and attendance are only allowed on or after the event date']);
+    echo json_encode(['status' => 'error', 'message' => 'Review and attendance are only allowed on or after the event start date']);
     exit();
 }
 

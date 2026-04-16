@@ -28,6 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 require_once __DIR__ . '/fcm_helper.php';
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/app_inbox_notifications_helper.php';
 
 if (!isset($conn) || !$conn) {
     http_response_code(500);
@@ -160,10 +161,24 @@ try {
     $stmt->close();
 
     if (empty($tokens)) {
+        $msg_esc = $conn->real_escape_string($message);
         $conn->query(
             "INSERT INTO organizer_notifications (event_id, organizer_id, message, recipient_type)
-             VALUES ({$event_id}, {$organizer_id}, '" . $conn->real_escape_string($message) . "', '{$recipient_type}')"
+             VALUES ({$event_id}, {$organizer_id}, '{$msg_esc}', '{$recipient_type}')"
         );
+        $org_notif_id = (int) $conn->insert_id;
+        try {
+            campus_inbox_organizer_broadcast_recipients(
+                $conn,
+                $ids,
+                $event_id,
+                (string) $ev['title'],
+                $message,
+                $org_notif_id > 0 ? $org_notif_id : null
+            );
+        } catch (Throwable $e) {
+            error_log('[send_organizer_notification] inbox: ' . $e->getMessage());
+        }
 
         $n = count($ids);
         echo json_encode([
@@ -180,8 +195,9 @@ try {
     $notification_title = 'Event: ' . $ev['title'];
     $notification_body  = $message;
     $fcm_data           = [
-        'type'     => 'organizer_message',
-        'event_id' => (string) $event_id,
+        'type'                => 'organizer_message',
+        'notification_type'   => 'organizer_message',
+        'event_id'            => (string) $event_id,
     ];
 
     $out            = fcm_send_to_tokens($tokens, $notification_title, $notification_body, $fcm_data);
@@ -196,6 +212,19 @@ try {
          VALUES ({$event_id}, {$organizer_id}, '{$msg_esc}', '{$recipient_type}')"
     );
     $org_notif_id = (int) $conn->insert_id;
+
+    try {
+        campus_inbox_organizer_broadcast_recipients(
+            $conn,
+            $ids,
+            $event_id,
+            (string) $ev['title'],
+            $message,
+            $org_notif_id > 0 ? $org_notif_id : null
+        );
+    } catch (Throwable $e) {
+        error_log('[send_organizer_notification] inbox: ' . $e->getMessage());
+    }
 
     $log_status = ($failed === 0) ? 'sent' : (($sent === 0) ? 'failed' : 'partial');
 

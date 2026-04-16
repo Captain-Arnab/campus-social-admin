@@ -17,7 +17,7 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
     $action = $_GET['action']; // approve, reject, hold, reschedule
 
     // Get current event status before update
-    $current_event = $conn->query("SELECT status, event_date FROM events WHERE id=$id")->fetch_assoc();
+    $current_event = $conn->query("SELECT status, event_date, organizer_id, title FROM events WHERE id=$id")->fetch_assoc();
     $old_status = $current_event['status'];
     
     $new_status = '';
@@ -59,9 +59,14 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
         $stmt = $conn->prepare("UPDATE events SET status=?, hold_reason=?, reschedule_date=? WHERE id=?");
         $stmt->bind_param("sssi", $new_status, $hold_reason, $reschedule_date, $id);
     } elseif ($action == 'reschedule') {
-        // Update event date for rescheduling
-        $stmt = $conn->prepare("UPDATE events SET event_date=? WHERE id=?");
-        $stmt->bind_param("si", $new_event_date, $id);
+        // Update start date; clear optional end (admin reschedule does not carry over old span)
+        require_once __DIR__ . '/event_date_range_schema.php';
+        if (schema_events_has_event_end_date($conn)) {
+            $stmt = $conn->prepare('UPDATE events SET event_date = ?, event_end_date = NULL WHERE id = ?');
+        } else {
+            $stmt = $conn->prepare('UPDATE events SET event_date = ? WHERE id = ?');
+        }
+        $stmt->bind_param('si', $new_event_date, $id);
     } else {
         // Clear hold fields when approving/rejecting
         $empty_date = NULL;
@@ -75,7 +80,40 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
         $log_stmt = $conn->prepare("INSERT INTO event_status_log (event_id, admin_type, admin_username, old_status, new_status, remarks) VALUES (?, ?, ?, ?, ?, ?)");
         $log_stmt->bind_param("isssss", $id, $user_type, $username, $old_status, $new_status, $remarks);
         $log_stmt->execute();
-        
+
+        if ($current_event && in_array($action, ['approve', 'reject', 'hold', 'reschedule'], true)) {
+            $inbox_helper = __DIR__ . '/api/app_inbox_notifications_helper.php';
+            if (is_readable($inbox_helper)) {
+                require_once $inbox_helper;
+                $orgId   = (int) ($current_event['organizer_id'] ?? 0);
+                $evTitle = (string) ($current_event['title'] ?? '');
+                try {
+                    if ($action === 'approve' || $action === 'reject') {
+                        campus_inbox_after_admin_approve_or_reject($conn, $id, $action, $orgId, $evTitle);
+                    } elseif ($action === 'hold') {
+                        $hold_plain = isset($hold_reason) ? (string) $hold_reason : '';
+                        $tentative  = isset($reschedule_date) && $reschedule_date !== null && $reschedule_date !== ''
+                            ? (string) $reschedule_date
+                            : null;
+                        campus_inbox_after_admin_hold($conn, $id, $orgId, $evTitle, $hold_plain, $tentative);
+                    } elseif ($action === 'reschedule' && !empty($new_event_date)) {
+                        $reason_plain = isset($reschedule_reason) ? (string) $reschedule_reason : '';
+                        campus_inbox_after_admin_reschedule(
+                            $conn,
+                            $id,
+                            $orgId,
+                            $evTitle,
+                            (string) ($current_event['event_date'] ?? ''),
+                            (string) $new_event_date,
+                            $reason_plain
+                        );
+                    }
+                } catch (Throwable $e) {
+                    error_log('[approve.php] organizer inbox notify: ' . $e->getMessage());
+                }
+            }
+        }
+
         // Redirect with success message
         header("Location: dashboard.php?msg=" . $action);
     } else {

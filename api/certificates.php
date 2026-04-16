@@ -1,5 +1,6 @@
 <?php
 include 'db.php';
+require_once __DIR__ . '/../event_date_range_schema.php';
 
 /**
  * Public URL prefix for files under the admin folder (uploads/certificates/...).
@@ -49,8 +50,12 @@ if ($user_id <= 0 && isset($_GET['id'])) {
 $event_id = isset($_GET['event_id']) ? intval($_GET['event_id']) : 0;
 
 if ($user_id > 0) {
+    $evCols = 'e.title AS event_title, e.event_date';
+    if (schema_events_has_event_end_date($conn)) {
+        $evCols .= ', e.event_end_date';
+    }
     $stmt = $conn->prepare(
-        "SELECT c.id, c.event_id, c.type, c.file_path, c.uploaded_at, e.title AS event_title, e.event_date
+        "SELECT c.id, c.event_id, c.type, c.file_path, c.uploaded_at, $evCols
          FROM event_certificates c
          INNER JOIN events e ON c.event_id = e.id
          WHERE c.user_id = ?
@@ -63,7 +68,7 @@ if ($user_id > 0) {
     while ($row = $result->fetch_assoc()) {
         $rel = $row['file_path'];
         $abs = certificate_public_url($rel);
-        $list[] = [
+        $item = [
             'id' => (int) $row['id'],
             'event_id' => (int) $row['event_id'],
             'event_title' => $row['event_title'],
@@ -74,6 +79,10 @@ if ($user_id > 0) {
             'url' => $abs,
             'uploaded_at' => $row['uploaded_at'],
         ];
+        if (!empty($row['event_end_date']) && ($row['event_end_date'] ?? '') !== '0000-00-00 00:00:00') {
+            $item['event_end_date'] = $row['event_end_date'];
+        }
+        $list[] = $item;
     }
     $stmt->close();
     echo json_encode(["status" => "success", "count" => count($list), "data" => $list]);

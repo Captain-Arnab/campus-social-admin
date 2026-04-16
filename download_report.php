@@ -211,10 +211,15 @@ function createDocx($events_data, $filename) {
             </w:tblPr>';
         
         // Table rows
+        $event_when = date('F d, Y - h:i A', strtotime($event['event_date']));
+        $eer = $event['event_end_date'] ?? null;
+        if (!empty($eer) && $eer !== '0000-00-00 00:00:00') {
+            $event_when .= ' → ' . date('F d, Y - h:i A', strtotime($eer));
+        }
         $details = [
             ['Event Title', $event['title']],
             ['Category', $event['category']],
-            ['Event Date', date('F d, Y - h:i A', strtotime($event['event_date']))],
+            ['Event date(s)', $event_when],
             ['Venue', $event['venue']],
             ['Status', strtoupper($event['status'])],
             ['Organizer', $event['organizer_name']],

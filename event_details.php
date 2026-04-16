@@ -2,6 +2,7 @@
 session_start();
 include 'db.php';
 require_once __DIR__ . '/admin_priv.php';
+require_once __DIR__ . '/event_date_range_schema.php';
 
 if ((!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) || !isset($_GET['id'])) {
     header("Location: dashboard.php");
@@ -31,7 +32,7 @@ if (!$event) {
 $banners = json_decode($event['banners'] ?? '[]');
 $is_pending = ($event['status'] == 'pending');
 $is_hold = ($event['status'] == 'hold');
-$is_past_event = (strtotime($event['event_date']) < time());
+$is_past_event = events_row_is_fully_past($event);
 
 $volunteers = $conn->query("
     SELECT v.id as vol_link_id, v.role, v.status as vol_status, v.attended as vol_attended, v.attendance_marked_at as vol_attendance_at,
@@ -208,7 +209,17 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                             </div>
                             <div class="col-6">
                                 <small class="text-muted fw-bold text-uppercase d-block mb-1" style="font-size: 0.6rem;">Timeline</small>
-                                <span class="fw-semibold"><i class="far fa-clock text-primary me-1"></i> <?php echo date('M d, Y | h:i A', strtotime($event['event_date'])); ?></span>
+                                <span class="fw-semibold"><i class="far fa-clock text-primary me-1"></i>
+                                    <?php
+                                    $ed_start = date('M d, Y | h:i A', strtotime($event['event_date']));
+                                    $ed_end_raw = $event['event_end_date'] ?? null;
+                                    if (!empty($ed_end_raw) && $ed_end_raw !== '0000-00-00 00:00:00') {
+                                        echo htmlspecialchars($ed_start) . ' <span class="text-muted">→</span> ' . htmlspecialchars(date('M d, Y | h:i A', strtotime($ed_end_raw)));
+                                    } else {
+                                        echo htmlspecialchars($ed_start);
+                                    }
+                                    ?>
+                                </span>
                             </div>
                             <?php if($event['reschedule_date']): ?>
                             <div class="col-12">
@@ -532,7 +543,15 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                     <div class="small mb-2"><strong>Title:</strong> <?php echo htmlspecialchars($pending_edit['title']); ?></div>
                     <?php if (!empty($pending_edit['description'])): ?><div class="small mb-2"><strong>Description:</strong> <?php echo nl2br(htmlspecialchars($pending_edit['description'])); ?></div><?php endif; ?>
                     <div class="small mb-2"><strong>Venue:</strong> <?php echo htmlspecialchars($pending_edit['venue']); ?></div>
-                    <?php if (!empty($pending_edit['event_date'])): ?><div class="small mb-2"><strong>Event date:</strong> <?php echo date('M d, Y h:i A', strtotime($pending_edit['event_date'])); ?></div><?php endif; ?>
+                    <?php if (!empty($pending_edit['event_date'])): ?>
+                    <div class="small mb-2"><strong>Starts:</strong> <?php echo date('M d, Y h:i A', strtotime($pending_edit['event_date'])); ?>
+                    <?php
+                    $pend_end = $pending_edit['event_end_date'] ?? null;
+                    if (!empty($pend_end) && $pend_end !== '0000-00-00 00:00:00') {
+                        echo ' &nbsp;<strong>Ends:</strong> ' . date('M d, Y h:i A', strtotime($pend_end));
+                    }
+                    ?></div>
+                    <?php endif; ?>
                     <?php if (!empty($pending_edit['category'])): ?><div class="small mb-3"><strong>Category:</strong> <?php echo htmlspecialchars($pending_edit['category']); ?></div><?php endif; ?>
                     <?php if (!empty($pending_edit['rules'])): ?><div class="small mb-3"><strong>Rules:</strong> <?php echo nl2br(htmlspecialchars($pending_edit['rules'])); ?></div><?php endif; ?>
                     <?php if (has_priv('approve_events')): ?>

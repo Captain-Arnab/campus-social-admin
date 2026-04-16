@@ -2,6 +2,7 @@
 session_start();
 include 'db.php';
 require_once __DIR__ . '/admin_priv.php';
+require_once __DIR__ . '/event_date_range_schema.php';
 
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     header("Location: index.php");
@@ -16,9 +17,9 @@ $username = isset($_SESSION['admin']) ? $_SESSION['admin'] : $_SESSION['subadmin
 $total_events = $conn->query("SELECT * FROM events")->num_rows;
 $pending_events = $conn->query("SELECT * FROM events WHERE status='pending'")->num_rows;
 $hold_events = $conn->query("SELECT * FROM events WHERE status='hold'")->num_rows;
-// Approved events that are upcoming (start in the future) or ongoing (started today — same calendar day)
+// Approved events not yet fully finished (includes multi-day ongoing)
 $active_events_sql = "SELECT COUNT(*) AS c FROM events WHERE status = 'approved'
-    AND (event_date >= NOW() OR (DATE(event_date) = CURDATE() AND event_date < NOW()))";
+    AND (" . events_sql_not_past_naked($conn) . ')';
 $active_events_row = $conn->query($active_events_sql);
 $live_events = $active_events_row ? (int) $active_events_row->fetch_assoc()['c'] : 0;
 
@@ -139,7 +140,13 @@ $hold_requests = $conn->query("
                             <div>
                                 <span class="category-pill mb-1 d-inline-block"><?php echo $row['category']; ?></span>
                                 <h6 class="fw-bold m-0"><?php echo $row['title']; ?></h6>
-                                <small class="text-muted"><i class="fas fa-user me-1"></i><?php echo $row['organizer_name']; ?> • <i class="far fa-clock me-1"></i><?php echo date('M d, Y', strtotime($row['event_date'])); ?></small>
+                                <small class="text-muted"><i class="fas fa-user me-1"></i><?php echo $row['organizer_name']; ?> • <i class="far fa-clock me-1"></i><?php echo date('M d, Y', strtotime($row['event_date'])); ?>
+                                <?php
+                                $pendEnd = $row['event_end_date'] ?? null;
+                                if (!empty($pendEnd) && $pendEnd !== '0000-00-00 00:00:00') {
+                                    echo ' → ' . date('M d, Y', strtotime($pendEnd));
+                                }
+                                ?></small>
                             </div>
                         </div>
                         <div class="d-flex align-items-center gap-3">

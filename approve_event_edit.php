@@ -40,6 +40,16 @@ if ($action === 'approve') {
         if ($event_date) {
             $conn->query("UPDATE events SET event_date='" . $conn->real_escape_string($event_date) . "' WHERE id=$id");
         }
+        $has_pe_end = @$conn->query("SHOW COLUMNS FROM event_pending_edits LIKE 'event_end_date'");
+        if ($has_pe_end && $has_pe_end->num_rows > 0) {
+            $pe_end_raw = $pending['event_end_date'] ?? null;
+            if ($pe_end_raw !== null && $pe_end_raw !== '' && $pe_end_raw !== '0000-00-00 00:00:00') {
+                $pe_esc = $conn->real_escape_string((string) $pe_end_raw);
+                $conn->query("UPDATE events SET event_end_date='$pe_esc' WHERE id=$id");
+            } else {
+                $conn->query("UPDATE events SET event_end_date=NULL WHERE id=$id");
+            }
+        }
         if ($category) {
             $conn->query("UPDATE events SET category='" . $conn->real_escape_string($category) . "' WHERE id=$id");
         }

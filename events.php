@@ -2,6 +2,7 @@
 session_start();
 include 'db.php';
 require_once __DIR__ . '/admin_priv.php';
+require_once __DIR__ . '/event_date_range_schema.php';
 
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     header("Location: index.php");
@@ -22,13 +23,13 @@ if (isset($_GET['ajax_filter'])) {
     if ($view == 'pending') {
         $date_condition = "AND e.status = 'pending'";
     } elseif ($view == 'past') {
-        $date_condition = "AND e.event_date < NOW() AND e.event_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+        $date_condition = 'AND ' . events_sql_past($conn, 'e') . ' AND COALESCE(e.event_end_date, e.event_date) >= DATE_SUB(NOW(), INTERVAL 30 DAY)';
     } elseif ($view == 'archive') {
-        $date_condition = "AND e.event_date < DATE_SUB(NOW(), INTERVAL 30 DAY)";
+        $date_condition = 'AND ' . events_sql_past($conn, 'e') . ' AND COALESCE(e.event_end_date, e.event_date) < DATE_SUB(NOW(), INTERVAL 30 DAY)';
     } elseif ($view == 'hold') {
         $date_condition = "AND e.status = 'hold'";
     } else {
-        $date_condition = "AND e.event_date >= NOW() AND e.status = 'approved'";
+        $date_condition = 'AND ' . events_sql_not_past($conn, 'e') . " AND e.status = 'approved'";
     }
 
     if (!empty($search_query)) $filter_sql .= " AND (e.title LIKE '%$search_query%' OR u.full_name LIKE '%$search_query%')";
@@ -82,6 +83,12 @@ if (isset($_GET['ajax_filter'])) {
                     <div class="d-flex flex-column">
                         <span class="fw-semibold" style="font-size: 0.8rem;"><?php echo date('M d, Y', strtotime($row['event_date'])); ?></span>
                         <small class="text-muted" style="font-size: 0.65rem;"><?php echo date('h:i A', strtotime($row['event_date'])); ?></small>
+                        <?php
+                        $rowEnd = $row['event_end_date'] ?? null;
+                        if (!empty($rowEnd) && $rowEnd !== '0000-00-00 00:00:00') {
+                            echo '<small class="text-muted d-block" style="font-size:0.6rem;">→ ' . date('M d, Y h:i A', strtotime($rowEnd)) . '</small>';
+                        }
+                        ?>
                         <?php if($row['status'] == 'hold' && $row['reschedule_date']): ?>
                         <small class="text-primary" style="font-size: 0.65rem;"><i class="fas fa-calendar-check"></i> Reschedule: <?php echo date('M d, Y', strtotime($row['reschedule_date'])); ?></small>
                         <?php endif; ?>
@@ -118,13 +125,13 @@ $date_condition = "";
 if ($view == 'pending') {
     $date_condition = "AND e.status = 'pending'";
 } elseif ($view == 'past') {
-    $date_condition = "AND e.event_date < NOW() AND e.event_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+    $date_condition = 'AND ' . events_sql_past($conn, 'e') . ' AND COALESCE(e.event_end_date, e.event_date) >= DATE_SUB(NOW(), INTERVAL 30 DAY)';
 } elseif ($view == 'archive') {
-    $date_condition = "AND e.event_date < DATE_SUB(NOW(), INTERVAL 30 DAY)";
+    $date_condition = 'AND ' . events_sql_past($conn, 'e') . ' AND COALESCE(e.event_end_date, e.event_date) < DATE_SUB(NOW(), INTERVAL 30 DAY)';
 } elseif ($view == 'hold') {
     $date_condition = "AND e.status = 'hold'";
 } else {
-    $date_condition = "AND e.event_date >= NOW() AND e.status = 'approved'";
+    $date_condition = 'AND ' . events_sql_not_past($conn, 'e') . " AND e.status = 'approved'";
 }
 
 $order_by = ($view == 'pending') ? "e.created_at DESC" : "e.event_date DESC";
