@@ -378,3 +378,101 @@ function campus_inbox_organizer_broadcast_recipients(
         campus_inbox_insert($conn, $uid, 'organizer_message', $notifTitle, $message_plain, $event_id, $data);
     }
 }
+
+/**
+ * Notify the event organizer when admin changes event status
+ * (approve, reject, hold, reschedule, etc.)
+ *
+ * Call this from the admin panel after updating event status.
+ */
+function campus_inbox_after_status_change($conn, $event_id, $new_status, $old_status = null, $admin_note = '') {
+    if (!campus_inbox_table_exists($conn)) return;
+
+    $stmt = $conn->prepare('SELECT organizer_id, title FROM events WHERE id = ?');
+    if (!$stmt) return;
+    $stmt->bind_param('i', $event_id);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    if (!$row) return;
+
+    $organizer_id = (int) $row['organizer_id'];
+    $event_title  = (string) $row['title'];
+    if ($organizer_id <= 0) return;
+
+    switch (strtolower($new_status)) {
+        case 'approved':
+            $notif_type = 'event_approved';
+            $title      = 'Event Approved!';
+            $body       = "Your event \"{$event_title}\" has been approved by the admin.";
+            break;
+        case 'rejected':
+            $notif_type = 'event_rejected';
+            $title      = 'Event Rejected';
+            $body       = "Your event \"{$event_title}\" has been rejected.";
+            if ($admin_note !== '') $body .= " Reason: {$admin_note}";
+            break;
+        case 'hold':
+            $notif_type = 'event_hold';
+            $title      = 'Event On Hold';
+            $body       = "Your event \"{$event_title}\" has been put on hold by the admin.";
+            if ($admin_note !== '') $body .= " Note: {$admin_note}";
+            break;
+        case 'rescheduled':
+            $notif_type = 'event_rescheduled';
+            $title      = 'Event Rescheduled';
+            $body       = "Your event \"{$event_title}\" has been rescheduled by the admin.";
+            if ($admin_note !== '') $body .= " Note: {$admin_note}";
+            break;
+        default:
+            $notif_type = 'status_change';
+            $title      = 'Event Status Updated';
+            $body       = "Your event \"{$event_title}\" status changed to {$new_status}.";
+            break;
+    }
+
+    $data_json = json_encode([
+        'event_id'   => $event_id,
+        'old_status' => $old_status,
+        'new_status' => $new_status,
+    ]);
+
+    $ins = $conn->prepare(
+        'INSERT INTO user_inbox_notifications (user_id, notification_type, title, body, event_id, data_json, is_read, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 0, NOW())'
+    );
+    if ($ins) {
+        $ins->bind_param('isssis', $organizer_id, $notif_type, $title, $body, $event_id, $data_json);
+        $ins->execute();
+        $ins->close();
+    }
+
+    if (function_exists('fcm_send_to_tokens')) {
+        $hasActive = false;
+        $colCheck  = @$conn->query("SHOW COLUMNS FROM user_fcm_tokens LIKE 'is_active'");
+        if ($colCheck && $colCheck->num_rows > 0) $hasActive = true;
+        $activeFilter = $hasActive ? " AND (is_active = 1 OR is_active IS NULL)" : '';
+
+        $tkStmt = $conn->prepare(
+            "SELECT fcm_token FROM user_fcm_tokens WHERE user_id = ?{$activeFilter}"
+        );
+        if ($tkStmt) {
+            $tkStmt->bind_param('i', $organizer_id);
+            $tkStmt->execute();
+            $tkRes  = $tkStmt->get_result();
+            $tokens = [];
+            while ($tr = $tkRes->fetch_assoc()) {
+                $tokens[] = $tr['fcm_token'];
+            }
+            $tkStmt->close();
+
+            if (!empty($tokens)) {
+                fcm_send_to_tokens($tokens, $title, $body, [
+                    'type'              => $notif_type,
+                    'notification_type' => $notif_type,
+                    'event_id'          => (string) $event_id,
+                ]);
+            }
+        }
+    }
+}

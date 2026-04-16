@@ -2,6 +2,10 @@
 session_start();
 include 'db.php';
 require_once __DIR__ . '/admin_priv.php';
+if (file_exists(__DIR__ . '/api/fcm_helper.php')) {
+    require_once __DIR__ . '/api/fcm_helper.php';
+}
+require_once __DIR__ . '/api/app_inbox_notifications_helper.php';
 
 if ((!isset($_SESSION['admin']) && !isset($_SESSION['subadmin']))) {
     header("Location: index.php");
@@ -82,35 +86,17 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
         $log_stmt->execute();
 
         if ($current_event && in_array($action, ['approve', 'reject', 'hold', 'reschedule'], true)) {
-            $inbox_helper = __DIR__ . '/api/app_inbox_notifications_helper.php';
-            if (is_readable($inbox_helper)) {
-                require_once $inbox_helper;
-                $orgId   = (int) ($current_event['organizer_id'] ?? 0);
-                $evTitle = (string) ($current_event['title'] ?? '');
-                try {
-                    if ($action === 'approve' || $action === 'reject') {
-                        campus_inbox_after_admin_approve_or_reject($conn, $id, $action, $orgId, $evTitle);
-                    } elseif ($action === 'hold') {
-                        $hold_plain = isset($hold_reason) ? (string) $hold_reason : '';
-                        $tentative  = isset($reschedule_date) && $reschedule_date !== null && $reschedule_date !== ''
-                            ? (string) $reschedule_date
-                            : null;
-                        campus_inbox_after_admin_hold($conn, $id, $orgId, $evTitle, $hold_plain, $tentative);
-                    } elseif ($action === 'reschedule' && !empty($new_event_date)) {
-                        $reason_plain = isset($reschedule_reason) ? (string) $reschedule_reason : '';
-                        campus_inbox_after_admin_reschedule(
-                            $conn,
-                            $id,
-                            $orgId,
-                            $evTitle,
-                            (string) ($current_event['event_date'] ?? ''),
-                            (string) $new_event_date,
-                            $reason_plain
-                        );
-                    }
-                } catch (Throwable $e) {
-                    error_log('[approve.php] organizer inbox notify: ' . $e->getMessage());
-                }
+            $notif_status = ($action === 'reschedule') ? 'rescheduled' : $new_status;
+            $admin_note_text = '';
+            if ($action === 'hold' && isset($hold_reason)) {
+                $admin_note_text = (string) $hold_reason;
+            } elseif ($action === 'reschedule' && isset($reschedule_reason)) {
+                $admin_note_text = (string) $reschedule_reason;
+            }
+            try {
+                campus_inbox_after_status_change($conn, $id, $notif_status, $old_status, $admin_note_text);
+            } catch (Throwable $e) {
+                error_log('[approve.php] campus_inbox_after_status_change: ' . $e->getMessage());
             }
         }
 
