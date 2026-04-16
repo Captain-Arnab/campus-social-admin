@@ -5,18 +5,9 @@ error_reporting(E_ALL);
 session_start();
 include 'db.php';
 require_once __DIR__ . '/admin_priv.php';
+require_once __DIR__ . '/portal_auth.php';
 
 $login_error = false;
-
-function portal_verify_password($stored, $input) {
-    if ($stored === null || $stored === '') {
-        return false;
-    }
-    if (is_string($stored) && strncmp($stored, '$2y$', 4) === 0) {
-        return password_verify((string) $input, $stored);
-    }
-    return hash_equals((string) $stored, (string) $input);
-}
 
 if (isset($_POST['login'])) {
     $username = $conn->real_escape_string($_POST['username']);

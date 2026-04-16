@@ -154,6 +154,23 @@ if ($user_type == 'admin') {
         background: rgba(255, 95, 21, 0.1);
     }
 
+    /* Bootstrap .dropdown-toggle adds its own ::after caret; we use Font Awesome instead */
+    .user-profile-link.dropdown-toggle::after {
+        display: none;
+    }
+
+    .user-profile-link .profile-dropdown-chevron {
+        display: inline-block;
+        color: #6b7280;
+        font-size: 0.8rem;
+        transition: transform 0.25s ease;
+        transform: rotate(0deg);
+    }
+
+    .user-profile-link[aria-expanded="true"] .profile-dropdown-chevron {
+        transform: rotate(180deg);
+    }
+
     .user-avatar {
         width: 42px;
         height: 42px;
@@ -345,9 +362,11 @@ if ($user_type == 'admin') {
                     <span class="user-name"><?php echo $display_name; ?></span>
                     <span class="user-role"><?php echo $display_role; ?></span>
                 </div>
-                <i class="fas fa-chevron-down" style="color: #6b7280; font-size: 0.8rem;"></i>
+                <i class="fas fa-chevron-down profile-dropdown-chevron" aria-hidden="true"></i>
             </a>
             <ul class="dropdown-menu dropdown-menu-dark text-small shadow" aria-labelledby="dropdownUser1">
+                <li><a class="dropdown-item" href="change_password.php"><i class="fas fa-key me-2"></i>Change password</a></li>
+                <li><hr class="dropdown-divider"></li>
                 <li><a class="dropdown-item" href="logout.php"><i class="fas fa-sign-out-alt me-2"></i>Sign out</a></li>
             </ul>
         </div>
