@@ -78,6 +78,13 @@ if ($cert_res) {
     }
 }
 
+// Event review files
+$review_files = [];
+$rf_res = @$conn->query("SELECT id, file_path, file_type, original_name, uploaded_at FROM event_review_files WHERE event_id = $id ORDER BY uploaded_at ASC");
+if ($rf_res) {
+    while ($r = $rf_res->fetch_assoc()) { $review_files[] = $r; }
+}
+
 // Pending edit from organizer/editor (when event has editors, edits require admin approval)
 $pending_edit = null;
 $pending_edit_res = @$conn->query("SELECT p.*, u.full_name as submitted_by_name FROM event_pending_edits p JOIN users u ON p.submitted_by_user_id = u.id WHERE p.event_id = $id");
@@ -242,6 +249,37 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                             <small class="text-muted fw-bold text-uppercase d-block mb-1" style="font-size: 0.6rem;">About Event</small>
                             <p class="mb-0 text-secondary"><?php echo nl2br($event['description']); ?></p>
                         </div>
+
+                        <?php if (!empty($event['organizer_review'])): ?>
+                        <div style="background: #f0fdf4; padding: 15px; border-radius: 12px; border: 1px solid #bbf7d0; margin-top: 15px;">
+                            <small class="text-success fw-bold text-uppercase d-block mb-1" style="font-size: 0.6rem;">
+                                <i class="fas fa-star me-1"></i>Organizer Review
+                            </small>
+                            <p class="mb-1 text-secondary"><?php echo nl2br(htmlspecialchars($event['organizer_review'])); ?></p>
+                            <?php if ($event['organizer_review_at']): ?>
+                            <small class="text-muted" style="font-size:0.65rem;">Submitted: <?php echo date('M d, Y h:i A', strtotime($event['organizer_review_at'])); ?></small>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+
+                        <?php if (!empty($review_files)): ?>
+                        <div style="background: #fefce8; padding: 15px; border-radius: 12px; border: 1px solid #fde68a; margin-top: 15px;">
+                            <small class="text-warning fw-bold text-uppercase d-block mb-2" style="font-size: 0.6rem;">
+                                <i class="fas fa-paperclip me-1"></i>Review Attachments (<?php echo count($review_files); ?>)
+                            </small>
+                            <div class="d-flex flex-wrap gap-2">
+                                <?php foreach ($review_files as $rf): 
+                                    $is_image = strpos($rf['file_type'] ?? '', 'image') !== false;
+                                    $is_pdf = strpos($rf['file_type'] ?? '', 'pdf') !== false;
+                                ?>
+                                <a href="<?php echo htmlspecialchars($rf['file_path']); ?>" target="_blank" class="btn btn-sm <?php echo $is_pdf ? 'btn-outline-danger' : 'btn-outline-primary'; ?>" title="<?php echo htmlspecialchars($rf['original_name'] ?? 'File'); ?>">
+                                    <i class="fas fa-<?php echo $is_pdf ? 'file-pdf' : ($is_image ? 'image' : 'file'); ?> me-1"></i>
+                                    <?php echo htmlspecialchars($rf['original_name'] ?: 'File'); ?>
+                                </a>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                        <?php endif; ?>
                     </div>
                 </div>
 

@@ -102,9 +102,17 @@ if (isset($_GET['ajax_filter'])) {
                 <td class="text-end pe-4">
                     <div class="d-flex gap-2 justify-content-end">
                         <?php if (has_priv('reports')): ?>
-                        <a href="download_report.php?event_id=<?php echo $row['id']; ?>" class="btn-icon btn-download" title="Download Report">
-                            <i class="fas fa-download"></i>
-                        </a>
+                        <div class="dropdown d-inline-block">
+                            <button class="btn-icon btn-download dropdown-toggle" data-bs-toggle="dropdown" title="Download Report" style="font-size:0.7rem;">
+                                <i class="fas fa-download"></i>
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=all"><i class="fas fa-file-alt me-2"></i>Full Report</a></li>
+                                <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=volunteers"><i class="fas fa-hands-helping me-2"></i>Volunteers</a></li>
+                                <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=participants"><i class="fas fa-user-check me-2"></i>Participants</a></li>
+                                <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=joinees"><i class="fas fa-user-plus me-2"></i>Joinees</a></li>
+                            </ul>
+                        </div>
                         <?php endif; ?>
                         <a href="event_details.php?id=<?php echo $row['id']; ?>" class="btn-icon btn-view">
                             <i class="fas fa-chevron-right"></i>
@@ -293,9 +301,18 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
             </div>
             <div class="d-flex gap-2">
                 <button onclick="clearSelection()" class="btn btn-sm btn-outline-secondary">Clear Selection</button>
-                <button onclick="downloadBulkReports()" class="btn-bulk-download">
-                    <i class="fas fa-download me-2"></i>Download Reports
-                </button>
+                <div class="dropdown">
+                    <button class="btn-bulk-download dropdown-toggle" data-bs-toggle="dropdown">
+                        <i class="fas fa-download me-2"></i>Download Reports
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="#" onclick="downloadBulkReports('all');return false;"><i class="fas fa-file-alt me-2"></i>Full Report</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="#" onclick="downloadBulkReports('volunteers');return false;"><i class="fas fa-hands-helping me-2"></i>Volunteers Only</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="downloadBulkReports('participants');return false;"><i class="fas fa-user-check me-2"></i>Participants Only</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="downloadBulkReports('joinees');return false;"><i class="fas fa-user-plus me-2"></i>Joinees Only</a></li>
+                    </ul>
+                </div>
             </div>
         </div>
         <?php endif; ?>
@@ -381,9 +398,17 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
                             <td class="text-end pe-4">
                                 <div class="d-flex gap-2 justify-content-end">
                                     <?php if (has_priv('reports')): ?>
-                                    <a href="download_report.php?event_id=<?php echo $row['id']; ?>" class="btn-icon btn-download" title="Download Report">
-                                        <i class="fas fa-download"></i>
-                                    </a>
+                                    <div class="dropdown d-inline-block">
+                                        <button class="btn-icon btn-download dropdown-toggle" data-bs-toggle="dropdown" title="Download Report" style="font-size:0.7rem;">
+                                            <i class="fas fa-download"></i>
+                                        </button>
+                                        <ul class="dropdown-menu dropdown-menu-end">
+                                            <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=all"><i class="fas fa-file-alt me-2"></i>Full Report</a></li>
+                                            <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=volunteers"><i class="fas fa-hands-helping me-2"></i>Volunteers</a></li>
+                                            <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=participants"><i class="fas fa-user-check me-2"></i>Participants</a></li>
+                                            <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=joinees"><i class="fas fa-user-plus me-2"></i>Joinees</a></li>
+                                        </ul>
+                                    </div>
                                     <?php endif; ?>
                                     <a href="event_details.php?id=<?php echo $row['id']; ?>" class="btn-icon btn-view">
                                         <i class="fas fa-chevron-right"></i>
@@ -466,7 +491,7 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
             updateBulkActions();
         }
 
-        function downloadBulkReports() {
+        function downloadBulkReports(listType = 'all') {
             const checkedBoxes = document.querySelectorAll('.event-checkbox:checked');
             const eventIds = Array.from(checkedBoxes).map(cb => cb.value);
             
@@ -475,8 +500,7 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
                 return;
             }
             
-            // Redirect to bulk download script
-            window.location.href = `download_report.php?event_ids=${eventIds.join(',')}`;
+            window.location.href = `download_report.php?event_ids=${eventIds.join(',')}&list_type=${listType}`;
         }
 
         // Initialize checkbox listeners on page load

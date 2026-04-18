@@ -54,7 +54,7 @@ try {
         exit();
     }
 
-    if (!in_array($recipient_type, ['volunteers', 'participants', 'both'], true)) {
+    if (!in_array($recipient_type, ['volunteers', 'participants', 'both', 'all'], true)) {
         $recipient_type = 'both';
     }
 
@@ -94,30 +94,39 @@ try {
 
     $user_ids = [];
 
-    if ($recipient_type === 'volunteers' || $recipient_type === 'both') {
-        $st = $conn->prepare(
-            "SELECT user_id FROM volunteers WHERE event_id = ? AND status = 'active'"
-        );
-        $st->bind_param('i', $event_id);
-        $st->execute();
-        $res = $st->get_result();
-        while ($row = $res->fetch_assoc()) {
-            $user_ids[(int) $row['user_id']] = true;
+    if ($recipient_type === 'all') {
+        $st = $conn->query("SELECT id FROM users WHERE status = 'active'");
+        if ($st) {
+            while ($row = $st->fetch_assoc()) {
+                $user_ids[(int) $row['id']] = true;
+            }
         }
-        $st->close();
-    }
+    } else {
+        if ($recipient_type === 'volunteers' || $recipient_type === 'both') {
+            $st = $conn->prepare(
+                "SELECT user_id FROM volunteers WHERE event_id = ? AND status = 'active'"
+            );
+            $st->bind_param('i', $event_id);
+            $st->execute();
+            $res = $st->get_result();
+            while ($row = $res->fetch_assoc()) {
+                $user_ids[(int) $row['user_id']] = true;
+            }
+            $st->close();
+        }
 
-    if ($recipient_type === 'participants' || $recipient_type === 'both') {
-        $st = $conn->prepare(
-            "SELECT user_id FROM participant WHERE event_id = ? AND status = 'active'"
-        );
-        $st->bind_param('i', $event_id);
-        $st->execute();
-        $res = $st->get_result();
-        while ($row = $res->fetch_assoc()) {
-            $user_ids[(int) $row['user_id']] = true;
+        if ($recipient_type === 'participants' || $recipient_type === 'both') {
+            $st = $conn->prepare(
+                "SELECT user_id FROM participant WHERE event_id = ? AND status = 'active'"
+            );
+            $st->bind_param('i', $event_id);
+            $st->execute();
+            $res = $st->get_result();
+            while ($row = $res->fetch_assoc()) {
+                $user_ids[(int) $row['user_id']] = true;
+            }
+            $st->close();
         }
-        $st->close();
     }
 
     if (empty($user_ids)) {
@@ -168,14 +177,17 @@ try {
         );
         $org_notif_id = (int) $conn->insert_id;
         try {
-            campus_inbox_organizer_broadcast_recipients(
-                $conn,
-                $ids,
-                $event_id,
-                (string) $ev['title'],
-                $message,
-                $org_notif_id > 0 ? $org_notif_id : null
-            );
+            if ($recipient_type === 'all') {
+                campus_inbox_organizer_broadcast_all(
+                    $conn, $event_id, (string) $ev['title'], $message,
+                    $org_notif_id > 0 ? $org_notif_id : null
+                );
+            } else {
+                campus_inbox_organizer_broadcast_recipients(
+                    $conn, $ids, $event_id, (string) $ev['title'], $message,
+                    $org_notif_id > 0 ? $org_notif_id : null
+                );
+            }
         } catch (Throwable $e) {
             error_log('[send_organizer_notification] inbox: ' . $e->getMessage());
         }
@@ -183,7 +195,7 @@ try {
         $n = count($ids);
         echo json_encode([
             'status'            => 'success',
-            'message'           => "No active push tokens for {$n} volunteer(s)/participant(s). They must open the app and allow notifications.",
+            'message'           => "No active push tokens for {$n} user(s). They must open the app and allow notifications.",
             'users_targeted'    => $n,
             'push_sent'         => 0,
             'push_failed'       => 0,
@@ -214,14 +226,17 @@ try {
     $org_notif_id = (int) $conn->insert_id;
 
     try {
-        campus_inbox_organizer_broadcast_recipients(
-            $conn,
-            $ids,
-            $event_id,
-            (string) $ev['title'],
-            $message,
-            $org_notif_id > 0 ? $org_notif_id : null
-        );
+        if ($recipient_type === 'all') {
+            campus_inbox_organizer_broadcast_all(
+                $conn, $event_id, (string) $ev['title'], $message,
+                $org_notif_id > 0 ? $org_notif_id : null
+            );
+        } else {
+            campus_inbox_organizer_broadcast_recipients(
+                $conn, $ids, $event_id, (string) $ev['title'], $message,
+                $org_notif_id > 0 ? $org_notif_id : null
+            );
+        }
     } catch (Throwable $e) {
         error_log('[send_organizer_notification] inbox: ' . $e->getMessage());
     }

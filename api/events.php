@@ -186,6 +186,13 @@ if ($method == 'GET') {
                     $row['winners'][] = ['user_id' => (int) $w['user_id'], 'full_name' => $w['full_name'], 'position' => (int) $w['position']];
                 }
             }
+            // Event review files
+            $row['review_files'] = [];
+            $rf_res = @$conn->query("SELECT id, file_path, file_type, original_name, uploaded_at FROM event_review_files WHERE event_id = $event_id ORDER BY uploaded_at ASC");
+            if ($rf_res) {
+                while ($rf = $rf_res->fetch_assoc()) { $row['review_files'][] = $rf; }
+            }
+
             // Pending edit (when event has editors, organizer/editor edits await admin approval)
             $row['pending_edit'] = null;
             $pe_cols = "title, description, venue, event_date, category, submitted_by_user_id, submitted_at";

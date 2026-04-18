@@ -331,6 +331,24 @@ if ($user_type == 'admin') {
             </li>
             <?php endif; ?>
 
+            <?php if (has_priv('ad_posts')): ?>
+            <div class="menu-header">Content</div>
+            <li class="nav-item">
+                <a href="ad_posts.php" class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'ad_posts.php' ? 'active' : ''; ?>">
+                    <i class="fas fa-bullhorn"></i> Ad Posts
+                </a>
+            </li>
+            <?php endif; ?>
+
+            <?php if (has_priv('app_settings')): ?>
+            <div class="menu-header">Settings</div>
+            <li class="nav-item">
+                <a href="app_settings.php" class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'app_settings.php' ? 'active' : ''; ?>">
+                    <i class="fas fa-cog"></i> App Settings
+                </a>
+            </li>
+            <?php endif; ?>
+
             <?php if (has_priv('manage_users') || is_main_admin()): ?>
             <div class="menu-header">User Administration</div>
             <?php if (has_priv('manage_users')): ?>

@@ -48,5 +48,7 @@ function subadmin_privilege_definitions(): array
         'certificates' => 'Certificates',
         'reports' => 'Download reports',
         'notification_schedule' => 'Celebration / notification days — cron calendar (add, view & remove)',
+        'app_settings' => 'App settings (logo, branding)',
+        'ad_posts' => 'Advertisement posts (home screen banners)',
     ];
 }

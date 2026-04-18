@@ -13,11 +13,16 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit();
 }
 
-$raw = file_get_contents('php://input');
-$data = json_decode($raw, true);
+$content_type = $_SERVER['CONTENT_TYPE'] ?? '';
+if (stripos($content_type, 'multipart/form-data') !== false || !empty($_POST)) {
+    $data = $_POST;
+} else {
+    $raw = file_get_contents('php://input');
+    $data = json_decode($raw, true);
+}
 if (!is_array($data)) {
     http_response_code(400);
-    echo json_encode(['status' => 'error', 'message' => 'Invalid JSON']);
+    echo json_encode(['status' => 'error', 'message' => 'Invalid input']);
     exit();
 }
 
@@ -69,7 +74,42 @@ if ($action === 'set_review') {
     }
     $st->bind_param('si', $review, $event_id);
     if ($st->execute()) {
-        echo json_encode(['status' => 'success', 'message' => 'Review saved']);
+        $response = ['status' => 'success', 'message' => 'Review saved'];
+
+        $review_files = [];
+        $files_key = isset($_FILES['review_files']) ? 'review_files' : (isset($_FILES['review_file']) ? 'review_file' : null);
+        if ($files_key) {
+            $upload_dir = dirname(__DIR__) . '/uploads/review_files/';
+            if (!is_dir($upload_dir)) mkdir($upload_dir, 0777, true);
+
+            $allowed = ['image/jpeg','image/png','image/gif','image/webp','application/pdf'];
+            $fd = $_FILES[$files_key];
+            $is_multi = is_array($fd['tmp_name']);
+            $fc = $is_multi ? count($fd['tmp_name']) : 1;
+
+            for ($fi = 0; $fi < $fc; $fi++) {
+                $ftmp = $is_multi ? $fd['tmp_name'][$fi] : $fd['tmp_name'];
+                $ferr = $is_multi ? $fd['error'][$fi] : $fd['error'];
+                $fname = $is_multi ? $fd['name'][$fi] : $fd['name'];
+                $ftype = $is_multi ? $fd['type'][$fi] : $fd['type'];
+                if ($ferr !== UPLOAD_ERR_OK || !in_array($ftype, $allowed)) continue;
+
+                $ext = pathinfo($fname, PATHINFO_EXTENSION);
+                $fn = 'review_' . $event_id . '_' . time() . '_' . $fi . '.' . $ext;
+                if (move_uploaded_file($ftmp, $upload_dir . $fn)) {
+                    $path = 'uploads/review_files/' . $fn;
+                    $ins = $conn->prepare("INSERT INTO event_review_files (event_id, file_path, file_type, original_name, uploaded_by) VALUES (?, ?, ?, ?, ?)");
+                    $ins->bind_param('isssi', $event_id, $path, $ftype, $fname, $organizer_id);
+                    $ins->execute();
+                    $review_files[] = ['id' => (int)$conn->insert_id, 'file_path' => $path, 'original_name' => $fname];
+                    $ins->close();
+                }
+            }
+            $response['review_files_uploaded'] = count($review_files);
+            $response['review_files'] = $review_files;
+        }
+
+        echo json_encode($response);
     } else {
         http_response_code(500);
         echo json_encode(['status' => 'error', 'message' => $st->error]);

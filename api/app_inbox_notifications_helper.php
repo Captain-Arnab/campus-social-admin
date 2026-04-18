@@ -347,6 +347,43 @@ function campus_inbox_after_admin_reschedule(
 }
 
 /**
+ * Organizer broadcast to ALL users — persist one inbox row per active user.
+ */
+function campus_inbox_organizer_broadcast_all(
+    $conn,
+    int $event_id,
+    string $event_title_plain,
+    string $message_plain,
+    ?int $organizer_notification_id
+): void {
+    if (!campus_inbox_table_exists($conn) || $event_id <= 0) {
+        return;
+    }
+    $notifTitle = 'Event: ' . $event_title_plain;
+    $data = [
+        'type'               => 'organizer_message',
+        'event_id'           => $event_id,
+        'notification_type'  => 'organizer_message',
+    ];
+    if ($organizer_notification_id !== null && $organizer_notification_id > 0) {
+        $data['organizer_notification_id'] = $organizer_notification_id;
+    }
+    $dataStr = json_encode($data, JSON_UNESCAPED_UNICODE);
+
+    $stmt = $conn->prepare(
+        "INSERT INTO user_inbox_notifications
+           (user_id, notification_type, title, body, event_id, data_json)
+         SELECT u.id, 'organizer_message', ?, ?, ?, ?
+         FROM users u WHERE u.status = 'active'"
+    );
+    if ($stmt) {
+        $stmt->bind_param('ssis', $notifTitle, $message_plain, $event_id, $dataStr);
+        $stmt->execute();
+        $stmt->close();
+    }
+}
+
+/**
  * Organizer push to volunteers/participants — persist one inbox row per recipient.
  *
  * @param int[] $recipient_user_ids
