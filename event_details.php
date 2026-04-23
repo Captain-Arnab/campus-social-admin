@@ -478,7 +478,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                         <i class="fas fa-pen-to-square me-2"></i>EDIT EVENT DETAILS
                     </a>
                     <button type="button" class="btn-action-main w-100 mt-2" style="background: #6c5ce7; color: white; border: none;" onclick="openAddEditorsModal()">
-                        <i class="fas fa-user-plus me-2"></i>ADD EDITORS
+                        <i class="fas fa-user-plus me-2"></i>ADD FACULTY CORDINATORS
                     </button>
                     <div id="editorsList" class="mt-2 small">
                         <?php foreach ($event_editors as $ed): ?>
@@ -676,6 +676,16 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>
+        (function initEventDetailsContext() {
+            const fromQuery = parseInt(new URLSearchParams(window.location.search).get('id'), 10);
+            const fromPhp = <?php echo json_encode((int) $id); ?>;
+            window.__eventDetailsEventId = fromQuery > 0 ? fromQuery : (fromPhp > 0 ? fromPhp : 0);
+        })();
+        function getPageEventId() {
+            const id = window.__eventDetailsEventId;
+            return typeof id === 'number' && id > 0 ? id : 0;
+        }
+
         (function showMsgAlert() {
             const params = new URLSearchParams(window.location.search);
             const msg = params.get('msg');
@@ -817,8 +827,6 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
             });
         }
 
-        const eventId = <?php echo (int)$id; ?>;
-
         function openAddEditorsModal() {
             const modal = new bootstrap.Modal(document.getElementById('addEditorsModal'));
             modal.show();
@@ -833,7 +841,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
         });
 
         function fetchEditorUsers(search) {
-            const url = `get_users_for_editors.php?event_id=${eventId}&search=${encodeURIComponent(search)}`;
+            const url = `get_users_for_editors.php?event_id=${getPageEventId()}&search=${encodeURIComponent(search)}`;
             fetch(url).then(r => r.json()).then(data => {
                 const el = document.getElementById('editorSearchResults');
                 el.innerHTML = '';
@@ -860,7 +868,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
 
         function addEditor(userId, fullName, btnRow) {
             const fd = new FormData();
-            fd.append('event_id', eventId);
+            fd.append('event_id', String(getPageEventId()));
             fd.append('user_id', userId);
             fd.append('action', 'add');
             fetch('event_editors_action.php', { method: 'POST', body: fd }).then(r => r.json()).then(data => {
@@ -884,7 +892,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
 
         function removeEditor(userId, btn) {
             const fd = new FormData();
-            fd.append('event_id', eventId);
+            fd.append('event_id', String(getPageEventId()));
             fd.append('user_id', userId);
             fd.append('action', 'remove');
             fetch('event_editors_action.php', { method: 'POST', body: fd }).then(r => r.json()).then(data => {
@@ -912,7 +920,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                 return;
             }
             const fd = new FormData();
-            fd.append('event_id', eventId);
+            fd.append('event_id', String(getPageEventId()));
             fd.append('user_id', userId);
             fd.append('type', type);
             fd.append('certificate', file);
@@ -926,11 +934,27 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
         }
 
         function setWinner(userId, fullName, isWinner, btn) {
+            const eid = getPageEventId();
+            if (eid <= 0) {
+                Swal.fire('Error', 'Invalid event', 'error');
+                return;
+            }
+            const uid = parseInt(userId, 10);
+            if (!Number.isFinite(uid) || uid <= 0) {
+                Swal.fire('Error', 'Invalid participant.', 'error');
+                return;
+            }
             const fd = new FormData();
-            fd.append('event_id', eventId);
-            fd.append('user_id', userId);
-            fd.append('action', isWinner ? 'remove' : 'add');
-            fetch('event_winners_action.php', { method: 'POST', body: fd }).then(r => r.json()).then(data => {
+            fd.append('event_id', String(eid));
+            fd.append('winner_uid', String(uid));
+            fd.append('user_id', String(uid));
+            const winnerOp = isWinner ? 'remove' : 'add';
+            fd.append('winner_op', winnerOp);
+            const qs =
+                'event_id=' + encodeURIComponent(eid) +
+                '&winner_op=' + encodeURIComponent(winnerOp) +
+                '&winner_uid=' + encodeURIComponent(uid);
+            fetch('event_winners_action.php?' + qs, { method: 'POST', body: fd }).then(r => r.json()).then(data => {
                 if (data.status === 'success') {
                     if (isWinner) {
                         Swal.fire('Winner removed', fullName + ' has been removed from winners.', 'success').then(() => location.reload());

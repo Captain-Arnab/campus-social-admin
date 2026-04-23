@@ -15,8 +15,49 @@ if (!has_priv('events')) {
 }
 
 $event_id = isset($_POST['event_id']) ? intval($_POST['event_id']) : 0;
-$user_id = isset($_POST['user_id']) ? intval($_POST['user_id']) : 0;
-$action = isset($_POST['action']) ? $_POST['action'] : '';
+if ($event_id <= 0 && isset($_GET['event_id'])) {
+    $event_id = intval($_GET['event_id']);
+}
+
+// Prefer winner_uid: some WAFs strip POST fields named "user_id".
+$user_id = 0;
+foreach (['winner_uid', 'user_id'] as $uidKey) {
+    if (isset($_POST[$uidKey])) {
+        $user_id = intval($_POST[$uidKey]);
+        if ($user_id > 0) {
+            break;
+        }
+    }
+}
+if ($user_id <= 0) {
+    foreach (['winner_uid', 'user_id'] as $uidKey) {
+        if (isset($_GET[$uidKey])) {
+            $user_id = intval($_GET[$uidKey]);
+            if ($user_id > 0) {
+                break;
+            }
+        }
+    }
+}
+
+// Prefer winner_op: some hosts/WAFs strip or alter POST fields named "action".
+$action = '';
+foreach (['winner_op', 'action'] as $key) {
+    if (!isset($_POST[$key]) || !is_string($_POST[$key])) {
+        continue;
+    }
+    $t = strtolower(trim($_POST[$key]));
+    if ($t === 'add' || $t === 'remove') {
+        $action = $t;
+        break;
+    }
+}
+if ($action === '' && isset($_GET['winner_op']) && is_string($_GET['winner_op'])) {
+    $t = strtolower(trim($_GET['winner_op']));
+    if ($t === 'add' || $t === 'remove') {
+        $action = $t;
+    }
+}
 
 if ($event_id <= 0) {
     echo json_encode(['status' => 'error', 'message' => 'Invalid event']);
