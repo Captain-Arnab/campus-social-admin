@@ -1,6 +1,7 @@
 <?php
 include 'db.php';
 require_once __DIR__ . '/sms_helper.php';
+require_once __DIR__ . '/../portal_auth.php';
 $method = $_SERVER['REQUEST_METHOD'];
 
 // Helper for security
@@ -46,7 +47,7 @@ if ($method == 'POST') {
             }
             
             // Check if roll number already exists
-            $roll_number = $conn->real_escape_string($data['roll_number']);
+            $roll_number = $conn->real_escape_string(trim((string) $data['roll_number']));
             $check_roll = $conn->query("SELECT id FROM student_faculty WHERE roll_number = '$roll_number'");
             if ($check_roll->num_rows > 0) {
                 echo json_encode(["status" => "error", "message" => "Roll number already registered"]);
@@ -59,7 +60,7 @@ if ($method == 'POST') {
             }
             
             // Check if employee number already exists
-            $emp_number = $conn->real_escape_string($data['emp_number']);
+            $emp_number = $conn->real_escape_string(trim((string) $data['emp_number']));
             $check_emp = $conn->query("SELECT id FROM student_faculty WHERE emp_number = '$emp_number' AND emp_number != 'NA'");
             if ($check_emp->num_rows > 0) {
                 echo json_encode(["status" => "error", "message" => "Employee ID already registered"]);
@@ -70,10 +71,10 @@ if ($method == 'POST') {
         $department_class_reg = isset($data['department_class']) ? trim((string) $data['department_class']) : '';
         $department_class_sql = $department_class_reg !== '' ? "'" . $conn->real_escape_string($department_class_reg) . "'" : 'NULL';
 
-        // Sanitize inputs - bio and interests are optional
-        $name = $conn->real_escape_string($data['full_name']);
-        $email = $conn->real_escape_string($data['email']);
-        $phone = $conn->real_escape_string($data['phone']);
+        // Sanitize inputs - bio and interests are optional (trim + normalized email avoids login mismatch)
+        $name = $conn->real_escape_string(trim((string) $data['full_name']));
+        $email = $conn->real_escape_string(strtolower(trim((string) $data['email'])));
+        $phone = $conn->real_escape_string(trim((string) $data['phone']));
         $bio = isset($data['bio']) && !empty($data['bio']) ? $conn->real_escape_string($data['bio']) : '';
         $interests = isset($data['interests']) && !empty($data['interests']) ? $conn->real_escape_string($data['interests']) : '';
         $pass = password_hash($data['password'], PASSWORD_DEFAULT);
@@ -84,7 +85,7 @@ if ($method == 'POST') {
             : 'default_avatar.png';
 
         // Check if email or phone already exists
-        $check = $conn->query("SELECT id FROM users WHERE email = '$email' OR phone = '$phone'");
+        $check = $conn->query("SELECT id FROM users WHERE LOWER(TRIM(email)) = '$email' OR phone = '$phone'");
         if ($check->num_rows > 0) {
             echo json_encode(["status" => "error", "message" => "Email or Phone already registered"]);
             exit();
@@ -99,13 +100,13 @@ if ($method == 'POST') {
             
             // Insert into student_faculty table
             if ($is_student == 1) {
-                $roll_number = $conn->real_escape_string($data['roll_number']);
+                $roll_ins = $conn->real_escape_string(trim((string) $data['roll_number']));
                 $sf_sql = "INSERT INTO student_faculty (user_id, roll_number, emp_number, department_class) 
-                          VALUES ($user_id, '$roll_number', 'NA', $department_class_sql)";
+                          VALUES ($user_id, '$roll_ins', 'NA', $department_class_sql)";
             } else {
-                $emp_number = $conn->real_escape_string($data['emp_number']);
+                $emp_ins = $conn->real_escape_string(trim((string) $data['emp_number']));
                 $sf_sql = "INSERT INTO student_faculty (user_id, roll_number, emp_number, department_class) 
-                          VALUES ($user_id, 'NA', '$emp_number', $department_class_sql)";
+                          VALUES ($user_id, 'NA', '$emp_ins', $department_class_sql)";
             }
             
             if ($conn->query($sf_sql)) {
@@ -140,11 +141,12 @@ if ($method == 'POST') {
             exit();
         }
         
-        $identifier = $conn->real_escape_string($data['identifier'] ?? '');
-        $email_or_phone = $data['email_or_phone'] ?? '';
+        $identifier_raw = trim((string) ($data['identifier'] ?? ''));
+        $identifier = $conn->real_escape_string($identifier_raw);
+        $email_or_phone = trim((string) ($data['email_or_phone'] ?? ''));
         $is_student = (int)($data['is_student'] ?? 0);
         
-        if ($identifier === '' || $email_or_phone === '') {
+        if ($identifier_raw === '' || $email_or_phone === '') {
             echo json_encode(["status" => "error", "message" => "identifier and email_or_phone are required"]);
             exit();
         }
@@ -165,7 +167,7 @@ if ($method == 'POST') {
             exit();
         }
         $user = $u2->fetch_assoc();
-        if (!sms_phones_match($email_or_phone, $user['phone'])) {
+        if (!sms_phones_match_loose($email_or_phone, $user['phone'])) {
             echo json_encode(["status" => "error", "message" => "Phone number not found or doesn't match"]);
             exit();
         }
@@ -243,11 +245,16 @@ if ($method == 'POST') {
             exit();
         }
         
-        $identifier = $conn->real_escape_string($data['identifier']); // roll_number or emp_number
+        $identifier_raw = trim((string) ($data['identifier'] ?? ''));
+        if ($identifier_raw === '') {
+            echo json_encode(["status" => "error", "message" => "identifier (roll number or employee ID) is required"]);
+            exit();
+        }
+        $identifier = $conn->real_escape_string($identifier_raw);
         $contact_raw = trim((string)($data['email_or_phone'] ?? ''));
-        $password = $data['password'] ?? '';
-        $is_student = (int)$data['is_student'];
-        $by_mobile = (int)$data['by_mobile'];
+        $password = isset($data['password']) ? (string) $data['password'] : '';
+        $is_student = (int)($data['is_student'] ?? 0);
+        $by_mobile = (int)($data['by_mobile'] ?? 0);
         $otp_input = isset($data['otp']) ? trim((string) $data['otp']) : '';
         $use_otp = $otp_input !== '';
         
@@ -275,12 +282,14 @@ if ($method == 'POST') {
         $user = $user_res->fetch_assoc();
         
         if ($by_mobile) {
-            if (!sms_phones_match($contact_raw, $user['phone'])) {
+            if (!sms_phones_match_loose($contact_raw, $user['phone'])) {
                 echo json_encode(["status" => "error", "message" => "Phone number not found or doesn't match"]);
                 exit();
             }
         } else {
-            if (strcasecmp($contact_raw, trim($user['email'])) !== 0) {
+            $want = strtolower($contact_raw);
+            $have = strtolower(trim((string) $user['email']));
+            if ($want !== $have) {
                 echo json_encode(["status" => "error", "message" => "Email not found or doesn't match"]);
                 exit();
             }
@@ -351,12 +360,104 @@ if ($method == 'POST') {
                 echo json_encode(["status" => "error", "message" => "Password required, or use OTP with the SMS flow"]);
                 exit();
             }
-            if (password_verify($password, $user['password'])) {
+            if (portal_verify_password($user['password'], $password)) {
                 echo json_encode($issue_token());
             } else {
                 echo json_encode(["status" => "error", "message" => "Invalid password"]);
             }
         }
+    }
+
+    // 2b. SWITCH ROLE (student ↔ faculty) — re-auth with password; updates users + student_faculty
+    elseif ($action == 'switch_role') {
+        $data = json_decode(file_get_contents("php://input"), true);
+        if ($data === null) {
+            echo json_encode(["status" => "error", "message" => "Invalid JSON data"]);
+            exit();
+        }
+        $user_id = (int) ($data['user_id'] ?? 0);
+        $new_is_student = isset($data['new_is_student']) ? (int) $data['new_is_student'] : -1;
+        $password = isset($data['password']) ? (string) $data['password'] : '';
+        if ($user_id <= 0 || !in_array($new_is_student, [0, 1], true) || $password === '') {
+            echo json_encode(["status" => "error", "message" => "user_id, new_is_student (0 or 1), and password are required"]);
+            exit();
+        }
+        $ur = $conn->query("SELECT id, password, is_student, status FROM users WHERE id = $user_id LIMIT 1");
+        if (!$ur || $ur->num_rows === 0) {
+            echo json_encode(["status" => "error", "message" => "User not found"]);
+            exit();
+        }
+        $urow = $ur->fetch_assoc();
+        if (($urow['status'] ?? '') === 'blocked') {
+            echo json_encode(["status" => "error", "message" => "Account blocked"]);
+            exit();
+        }
+        if (!portal_verify_password($urow['password'], $password)) {
+            echo json_encode(["status" => "error", "message" => "Invalid password"]);
+            exit();
+        }
+        if ((int) $urow['is_student'] === $new_is_student) {
+            echo json_encode(["status" => "error", "message" => "Account is already in this role"]);
+            exit();
+        }
+
+        if ($new_is_student === 1) {
+            $roll = trim((string) ($data['roll_number'] ?? ''));
+            if ($roll === '') {
+                echo json_encode(["status" => "error", "message" => "roll_number is required when switching to student"]);
+                exit();
+            }
+            $roll_esc = $conn->real_escape_string($roll);
+            $dup = $conn->query("SELECT user_id FROM student_faculty WHERE roll_number = '$roll_esc' AND user_id != $user_id LIMIT 1");
+            if ($dup && $dup->num_rows > 0) {
+                echo json_encode(["status" => "error", "message" => "Roll number already in use"]);
+                exit();
+            }
+        } else {
+            $emp = trim((string) ($data['emp_number'] ?? ''));
+            if ($emp === '') {
+                echo json_encode(["status" => "error", "message" => "emp_number is required when switching to faculty"]);
+                exit();
+            }
+            $emp_esc = $conn->real_escape_string($emp);
+            $dup = $conn->query("SELECT user_id FROM student_faculty WHERE emp_number = '$emp_esc' AND emp_number != 'NA' AND user_id != $user_id LIMIT 1");
+            if ($dup && $dup->num_rows > 0) {
+                echo json_encode(["status" => "error", "message" => "Employee ID already in use"]);
+                exit();
+            }
+        }
+
+        $conn->begin_transaction();
+        try {
+            $conn->query("UPDATE users SET is_student = $new_is_student WHERE id = $user_id");
+            if ($new_is_student === 1) {
+                $roll_esc = $conn->real_escape_string(trim((string) $data['roll_number']));
+                $conn->query("UPDATE student_faculty SET roll_number = '$roll_esc', emp_number = 'NA' WHERE user_id = $user_id");
+            } else {
+                $emp_esc = $conn->real_escape_string(trim((string) $data['emp_number']));
+                $conn->query("UPDATE student_faculty SET roll_number = 'NA', emp_number = '$emp_esc' WHERE user_id = $user_id");
+            }
+            if ($conn->errno) {
+                throw new Exception($conn->error);
+            }
+            $conn->commit();
+        } catch (Throwable $e) {
+            $conn->rollback();
+            echo json_encode(["status" => "error", "message" => "Could not update role"]);
+            exit();
+        }
+
+        $out = ["status" => "success", "message" => "Role updated", "user_id" => $user_id, "is_student" => $new_is_student];
+        $sf2 = $conn->query("SELECT roll_number, emp_number FROM student_faculty WHERE user_id = $user_id");
+        if ($sf2 && $sf2->num_rows > 0) {
+            $s = $sf2->fetch_assoc();
+            if ($new_is_student === 1) {
+                $out['roll_number'] = $s['roll_number'];
+            } else {
+                $out['emp_number'] = $s['emp_number'];
+            }
+        }
+        echo json_encode($out);
     }
 
     // 3. UPDATE DETAILS

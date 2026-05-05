@@ -9,8 +9,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
     // Step 1: Verify Email
     if ($action == 'check_email') {
-        $email = $conn->real_escape_string($data['email']);
-        $check = $conn->query("SELECT id FROM users WHERE email = '$email'");
+        $email = $conn->real_escape_string(strtolower(trim((string) ($data['email'] ?? ''))));
+        $check = $conn->query("SELECT id FROM users WHERE LOWER(TRIM(email)) = '$email'");
         
         if ($check->num_rows > 0) {
             // In a real app, send OTP email here
@@ -22,10 +22,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
     // Step 2: Reset Password
     elseif ($action == 'reset') {
-        $email = $conn->real_escape_string($data['email']);
+        $email = $conn->real_escape_string(strtolower(trim((string) ($data['email'] ?? ''))));
         $new_pass = password_hash($data['password'], PASSWORD_DEFAULT);
         
-        $sql = "UPDATE users SET password = '$new_pass' WHERE email = '$email'";
+        $sql = "UPDATE users SET password = '$new_pass' WHERE LOWER(TRIM(email)) = '$email'";
         if ($conn->query($sql)) {
             echo json_encode(["status" => "success", "message" => "Password changed successfully"]);
         } else {

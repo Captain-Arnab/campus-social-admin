@@ -23,6 +23,21 @@ function sms_phones_match($a, $b) {
     return $na !== null && $nb !== null && $na === $nb;
 }
 
+/**
+ * Login-friendly match: same as sms_phones_match, or last 10 digits equal (handles formatting drift).
+ */
+function sms_phones_match_loose($a, $b) {
+    if (sms_phones_match($a, $b)) {
+        return true;
+    }
+    $da = preg_replace('/\D/', '', (string) $a);
+    $db = preg_replace('/\D/', '', (string) $b);
+    if (strlen($da) >= 10 && strlen($db) >= 10) {
+        return substr($da, -10) === substr($db, -10);
+    }
+    return false;
+}
+
 function sms_load_config() {
     $defaults = [
         'base_url' => getenv('SMS_GATEWAY_BASE_URL') ?: '',

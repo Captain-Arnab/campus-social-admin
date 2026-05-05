@@ -4,6 +4,31 @@ require_once __DIR__ . '/sms_helper.php';
 require_once __DIR__ . '/../event_date_range_schema.php';
 $method = $_SERVER['REQUEST_METHOD'];
 
+/** Public web base for deep links / share sheet (override with MICAMPUS_PUBLIC_BASE). */
+function events_api_public_base(): string
+{
+    $b = getenv('MICAMPUS_PUBLIC_BASE');
+    return rtrim(($b !== false && $b !== '') ? $b : 'https://micampus.co.in', '/');
+}
+
+/**
+ * viewer_count = attendees who tapped "join" for the event (spectators / venue sizing).
+ * share_* helps mobile clients build a working Share intent.
+ */
+function events_api_enrich_event_row(array &$row): void
+{
+    $row['viewer_count'] = isset($row['attendee_count']) ? (int) $row['attendee_count'] : 0;
+    $q = getenv('MICAMPUS_EVENT_SHARE_PATH');
+    $path = ($q !== false && $q !== '') ? $q : '/event?id=';
+    if ($path[0] !== '/') {
+        $path = '/' . $path;
+    }
+    $eid = (int) ($row['id'] ?? 0);
+    $row['share_url'] = events_api_public_base() . $path . $eid;
+    $title = (string) ($row['title'] ?? 'Event');
+    $row['share_text'] = $title . ' — ' . $row['share_url'];
+}
+
 // --- 1. GET EVENTS ---
 if ($method == 'GET') {
     $view = isset($_GET['type']) ? $_GET['type'] : 'live';
@@ -41,6 +66,7 @@ if ($method == 'GET') {
         $data = [];
         while ($row = $result->fetch_assoc()) {
             $row['banners'] = json_decode($row['banners'] ?? '[]');
+            events_api_enrich_event_row($row);
             $data[] = $row;
         }
         echo json_encode(["status" => "success", "count" => count($data), "data" => $data]);
@@ -62,6 +88,7 @@ if ($method == 'GET') {
         $data = [];
         while ($row = $result->fetch_assoc()) {
             $row['banners'] = json_decode($row['banners'] ?? '[]');
+            events_api_enrich_event_row($row);
             $data[] = $row;
         }
         echo json_encode(["status" => "success", "count" => count($data), "data" => $data]);
@@ -83,6 +110,7 @@ if ($method == 'GET') {
         $data = [];
         while ($row = $result->fetch_assoc()) {
             $row['banners'] = json_decode($row['banners'] ?? '[]');
+            events_api_enrich_event_row($row);
             $data[] = $row;
         }
         echo json_encode(["status" => "success", "count" => count($data), "data" => $data]);
@@ -103,6 +131,7 @@ if ($method == 'GET') {
         $data = [];
         while ($row = $result->fetch_assoc()) {
             $row['banners'] = json_decode($row['banners'] ?? '[]');
+            events_api_enrich_event_row($row);
             $data[] = $row;
         }
         echo json_encode(["status" => "success", "count" => count($data), "data" => $data]);
@@ -123,6 +152,7 @@ if ($method == 'GET') {
         $data = [];
         while ($row = $result->fetch_assoc()) {
             $row['banners'] = json_decode($row['banners'] ?? '[]');
+            events_api_enrich_event_row($row);
             $data[] = $row;
         }
         echo json_encode(["status" => "success", "count" => count($data), "data" => $data]);
@@ -165,7 +195,7 @@ if ($method == 'GET') {
                 $row['volunteer_list'][] = $v;
             }
 
-            $part_res = $conn->query("SELECT u.full_name AS student_name, u.full_name AS full_name, u.phone AS phone, u.phone AS contact_number, p.user_id, p.department_class, 'Participant' AS role, p.attended, p.attendance_marked_at FROM participant p JOIN users u ON p.user_id = u.id WHERE p.event_id = $event_id AND p.status = 'active'");
+            $part_res = $conn->query("SELECT u.full_name AS student_name, u.full_name AS full_name, u.phone AS phone, u.phone AS contact_number, p.user_id, p.department_class, IFNULL(NULLIF(TRIM(p.department_class), ''), 'Participant') AS role, p.attended, p.attendance_marked_at FROM participant p JOIN users u ON p.user_id = u.id WHERE p.event_id = $event_id AND p.status = 'active'");
             $row['participant_list'] = [];
             while ($p = $part_res->fetch_assoc()) {
                 $row['participant_list'][] = $p;
@@ -186,6 +216,7 @@ if ($method == 'GET') {
                     $row['winners'][] = ['user_id' => (int) $w['user_id'], 'full_name' => $w['full_name'], 'position' => (int) $w['position']];
                 }
             }
+            $row['attendance_locked'] = !empty($row['winners']);
             // Event review files
             $row['review_files'] = [];
             $rf_res = @$conn->query("SELECT id, file_path, file_type, original_name, uploaded_at FROM event_review_files WHERE event_id = $event_id ORDER BY uploaded_at ASC");
@@ -212,6 +243,7 @@ if ($method == 'GET') {
                 $row['pending_edit'] = $pe_res->fetch_assoc();
             }
         }
+        events_api_enrich_event_row($row);
         $data[] = $row;
     }
 
