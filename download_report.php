@@ -112,6 +112,153 @@ function esc($text) {
     return htmlspecialchars((string) $text, ENT_XML1, 'UTF-8');
 }
 
+/**
+ * Event banners are saved under admin/uploads/events (see admin/api/events.php), not campus_social/uploads/events.
+ */
+function report_resolve_banner_file_path(string $fn): ?string
+{
+    $candidates = [
+        __DIR__ . '/uploads/events/' . $fn,
+        __DIR__ . '/../uploads/events/' . $fn,
+    ];
+    foreach ($candidates as $path) {
+        if (is_file($path) && is_readable($path)) {
+            return $path;
+        }
+    }
+    return null;
+}
+
+/**
+ * Word displays JPEG/PNG/GIF reliably; WebP is converted to JPEG when GD is available.
+ *
+ * @return array{bytes: string, content_type: string, ext: string}|null
+ */
+function report_normalize_image_for_docx(string $bytes, string $extFromName): ?array
+{
+    $ext = strtolower($extFromName);
+    if (function_exists('getimagesizefromstring')) {
+        $info = @getimagesizefromstring($bytes);
+        if ($info !== false && !empty($info['mime'])) {
+            $mime = (string) $info['mime'];
+            $mimeExt = [
+                'image/jpeg' => 'jpg',
+                'image/png' => 'png',
+                'image/gif' => 'gif',
+                'image/webp' => 'webp',
+            ];
+            if (isset($mimeExt[$mime])) {
+                $ext = $mimeExt[$mime];
+            }
+        }
+    }
+
+    $direct = [
+        'jpg' => ['image/jpeg', 'jpeg'],
+        'jpeg' => ['image/jpeg', 'jpeg'],
+        'png' => ['image/png', 'png'],
+        'gif' => ['image/gif', 'gif'],
+    ];
+    if (isset($direct[$ext])) {
+        return ['bytes' => $bytes, 'content_type' => $direct[$ext][0], 'ext' => $direct[$ext][1]];
+    }
+
+    if ($ext === 'webp' && function_exists('imagecreatefromstring') && function_exists('imagejpeg')) {
+        $im = @imagecreatefromstring($bytes);
+        if ($im === false) {
+            return null;
+        }
+        if (function_exists('imagepalettetotruecolor')) {
+            @imagepalettetotruecolor($im);
+        }
+        imagealphablending($im, true);
+        imagesavealpha($im, false);
+        ob_start();
+        imagejpeg($im, null, 90);
+        $jpg = ob_get_clean();
+        imagedestroy($im);
+        if ($jpg === false || $jpg === '') {
+            return null;
+        }
+        return ['bytes' => $jpg, 'content_type' => 'image/jpeg', 'ext' => 'jpeg'];
+    }
+
+    return null;
+}
+
+/**
+ * First event banner file on disk for the DOCX embed.
+ *
+ * @return array{bytes: string, content_type: string, ext: string}|null
+ */
+function report_banner_image_payload(array $event): ?array
+{
+    $raw = $event['banners'] ?? '[]';
+    $banners = json_decode($raw, true);
+    if (!is_array($banners) || empty($banners[0])) {
+        return null;
+    }
+    $first = trim((string) $banners[0]);
+    $first = preg_replace('/[#?].*$/', '', $first);
+    $fn = basename(str_replace('\\', '/', $first));
+    if ($fn === '' || $fn === '.' || $fn === '..') {
+        return null;
+    }
+    $path = report_resolve_banner_file_path($fn);
+    if ($path === null) {
+        return null;
+    }
+    $bytes = @file_get_contents($path);
+    if ($bytes === false || $bytes === '') {
+        return null;
+    }
+    $ext = strtolower(pathinfo($fn, PATHINFO_EXTENSION));
+
+    return report_normalize_image_for_docx($bytes, $ext);
+}
+
+/**
+ * @return array{cx: int, cy: int}
+ */
+function report_docx_image_extent_emu(string $bytes): array
+{
+    $maxW = 400;
+    $fallbackH = 260;
+    if (function_exists('getimagesizefromstring')) {
+        $info = @getimagesizefromstring($bytes);
+        if ($info !== false && !empty($info[0]) && !empty($info[1])) {
+            $w = (int) $info[0];
+            $h = (int) $info[1];
+            if ($w > $maxW) {
+                $h = (int) round($h * ($maxW / $w));
+                $w = $maxW;
+            }
+            return [
+                'cx' => (int) round($w * 9525),
+                'cy' => (int) round($h * 9525),
+            ];
+        }
+    }
+    return ['cx' => (int) round($maxW * 9525), 'cy' => (int) round($fallbackH * 9525)];
+}
+
+function report_docx_banner_paragraph(string $embedRid, int $cxEmu, int $cyEmu, int $docPrId): string
+{
+    return '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="400"/></w:pPr><w:r><w:drawing>'
+        . '<wp:inline distT="0" distB="0" distL="0" distR="0" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+        . '<wp:extent cx="' . $cxEmu . '" cy="' . $cyEmu . '"/>'
+        . '<wp:docPr id="' . $docPrId . '" name="Event thumbnail"/>'
+        . '<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>'
+        . '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+        . '<pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="Banner"/><pic:cNvPicPr/></pic:nvPicPr>'
+        . '<pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="' . esc($embedRid) . '"/>'
+        . '<a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+        . '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' . $cxEmu . '" cy="' . $cyEmu . '"/></a:xfrm>'
+        . '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
+        . '</pic:pic></a:graphicData></a:graphic>'
+        . '</wp:inline></w:drawing></w:r></w:p>';
+}
+
 function createDocx($events_data, $filename, $list_type) {
     $zip = new ZipArchive();
     $temp_file = sys_get_temp_dir() . '/' . $filename;
@@ -120,26 +267,21 @@ function createDocx($events_data, $filename, $list_type) {
         return false;
     }
     
-    $content_types = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-    <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-    <Default Extension="xml" ContentType="application/xml"/>
-    <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-    <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
-</Types>';
-    $zip->addFromString('[Content_Types].xml', $content_types);
-    
     $rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
     <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>';
     $zip->addFromString('_rels/.rels', $rels);
     
-    $doc_rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-</Relationships>';
-    $zip->addFromString('word/_rels/document.xml.rels', $doc_rels);
+    $doc_rels_lines = [
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+        '    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>',
+    ];
+    $next_rid = 2;
+    $ct_overrides = [];
+    $media_num = 0;
+    $doc_pr_seq = 1;
     
     $styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
@@ -159,7 +301,7 @@ function createDocx($events_data, $filename, $list_type) {
     $zip->addFromString('word/styles.xml', $styles);
     
     $document = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
     <w:body>';
     
     $list_label = ['all' => 'Full Report', 'volunteers' => 'Volunteers List', 'participants' => 'Participants List', 'joinees' => 'Joinees (Attendees) List'];
@@ -178,6 +320,19 @@ function createDocx($events_data, $filename, $list_type) {
         <w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="600"/></w:pPr>
             <w:r><w:rPr><w:sz w:val="24"/></w:rPr>
                 <w:t>' . esc($list_label[$list_type]) . '</w:t></w:r></w:p>';
+
+        $banner = report_banner_image_payload($event);
+        if ($banner !== null) {
+            $media_num++;
+            $zip->addFromString('word/media/banner_' . $media_num . '.' . $banner['ext'], $banner['bytes']);
+            $embed_rid = 'rId' . $next_rid;
+            $doc_rels_lines[] = '    <Relationship Id="' . $embed_rid . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/banner_' . $media_num . '.' . $banner['ext'] . '"/>';
+            $ct_overrides[] = '    <Override PartName="/word/media/banner_' . $media_num . '.' . $banner['ext'] . '" ContentType="' . esc($banner['content_type']) . '"/>';
+            $ext_emu = report_docx_image_extent_emu($banner['bytes']);
+            $document .= report_docx_banner_paragraph($embed_rid, $ext_emu['cx'], $ext_emu['cy'], $doc_pr_seq);
+            $doc_pr_seq++;
+            $next_rid++;
+        }
         
         // Event Details Table
         $document .= '
@@ -361,7 +516,25 @@ function createDocx($events_data, $filename, $list_type) {
     $document .= '
     </w:body>
 </w:document>';
-    
+
+    $doc_rels_lines[] = '</Relationships>';
+    $doc_rels = implode("\n", $doc_rels_lines);
+
+    $content_types = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+    <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+    <Default Extension="xml" ContentType="application/xml"/>
+    <Default Extension="jpeg" ContentType="image/jpeg"/>
+    <Default Extension="jpg" ContentType="image/jpeg"/>
+    <Default Extension="png" ContentType="image/png"/>
+    <Default Extension="gif" ContentType="image/gif"/>
+    <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+    <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+' . implode("\n", $ct_overrides) . '
+</Types>';
+
+    $zip->addFromString('[Content_Types].xml', $content_types);
+    $zip->addFromString('word/_rels/document.xml.rels', $doc_rels);
     $zip->addFromString('word/document.xml', $document);
     $zip->close();
     

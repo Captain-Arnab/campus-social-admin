@@ -478,7 +478,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                         <i class="fas fa-pen-to-square me-2"></i>EDIT EVENT DETAILS
                     </a>
                     <button type="button" class="btn-action-main w-100 mt-2" style="background: #6c5ce7; color: white; border: none;" onclick="openAddEditorsModal()">
-                        <i class="fas fa-user-plus me-2"></i>ADD FACULTY CORDINATORS
+                        <i class="fas fa-user-plus me-2"></i>ADD FACULTY COORDINATORS
                     </button>
                     <div id="editorsList" class="mt-2 small">
                         <?php foreach ($event_editors as $ed): ?>
@@ -661,11 +661,11 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
         <div class="modal-dialog modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Add Editors</h5>
+                    <h5 class="modal-title">Add faculty coordinators</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="small text-muted">Search by name or email. Event creator is not listed.</p>
+                    <p class="small text-muted">Search by name or email. Only <strong>faculty</strong> app accounts are listed. The event creator is not shown.</p>
                     <input type="text" id="editorSearch" class="form-control mb-3" placeholder="Search by name or email..." autocomplete="off">
                     <div id="editorSearchResults" class="list-group list-group-flush"></div>
                 </div>
@@ -684,6 +684,32 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
         function getPageEventId() {
             const id = window.__eventDetailsEventId;
             return typeof id === 'number' && id > 0 ? id : 0;
+        }
+
+        /**
+         * Apache/nginx often 301s script.php → script. For fetch(POST), following that redirect drops FormData
+         * (method becomes GET), so APIs see empty POST and return "Invalid parameters". Match the page URL style.
+         */
+        const ADMIN_FETCH_EXT = /\.php$/i.test(window.location.pathname) ? '.php' : '';
+
+        /** Same-origin session cookies + clear errors when the server returns HTML (PHP fatal) instead of JSON. */
+        function adminFetchJson(input, init) {
+            const opts = Object.assign({ credentials: 'same-origin' }, init || {});
+            return fetch(input, opts).then(function (r) {
+                return r.text().then(function (text) {
+                    let data;
+                    try {
+                        data = text ? JSON.parse(text) : {};
+                    } catch (e) {
+                        const snippet = (text || '').trim().slice(0, 400);
+                        throw new Error(snippet || 'Server returned non-JSON (check Network response / PHP error log).');
+                    }
+                    if (!r.ok) {
+                        throw new Error((data && data.message) ? data.message : ('Request failed (' + r.status + ')'));
+                    }
+                    return data;
+                });
+            });
         }
 
         (function showMsgAlert() {
@@ -841,12 +867,16 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
         });
 
         function fetchEditorUsers(search) {
-            const url = `get_users_for_editors.php?event_id=${getPageEventId()}&search=${encodeURIComponent(search)}`;
-            fetch(url).then(r => r.json()).then(data => {
+            const url = `get_users_for_editors${ADMIN_FETCH_EXT}?event_id=${getPageEventId()}&search=${encodeURIComponent(search)}`;
+            adminFetchJson(url).then(data => {
                 const el = document.getElementById('editorSearchResults');
                 el.innerHTML = '';
-                if (data.status !== 'success' || !data.data.length) {
-                    el.innerHTML = '<div class="text-muted small py-2">No users found.</div>';
+                if (data.status !== 'success') {
+                    el.innerHTML = '<div class="text-danger small py-2">' + escapeHtml(data.message || 'Could not load users.') + '</div>';
+                    return;
+                }
+                if (!data.data.length) {
+                    el.innerHTML = '<div class="text-muted small py-2">No faculty accounts found. Coordinators must be app users with a faculty profile.</div>';
                     return;
                 }
                 data.data.forEach(u => {
@@ -857,6 +887,9 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                     item.onclick = () => addEditor(u.id, u.full_name, item);
                     el.appendChild(item);
                 });
+            }).catch(err => {
+                document.getElementById('editorSearchResults').innerHTML =
+                    '<div class="text-danger small py-2">' + escapeHtml(err.message || 'Request failed') + '</div>';
             });
         }
 
@@ -871,7 +904,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
             fd.append('event_id', String(getPageEventId()));
             fd.append('user_id', userId);
             fd.append('action', 'add');
-            fetch('event_editors_action.php', { method: 'POST', body: fd }).then(r => r.json()).then(data => {
+            adminFetchJson('event_editors_action' + ADMIN_FETCH_EXT, { method: 'POST', body: fd }).then(data => {
                 if (data.status === 'success') {
                     const list = document.getElementById('editorsList');
                     const p = list.querySelector('p.text-muted');
@@ -887,7 +920,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                 } else {
                     Swal.fire('Error', data.message || 'Failed', 'error');
                 }
-            });
+            }).catch(err => Swal.fire('Error', err.message || 'Failed', 'error'));
         }
 
         function removeEditor(userId, btn) {
@@ -895,7 +928,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
             fd.append('event_id', String(getPageEventId()));
             fd.append('user_id', userId);
             fd.append('action', 'remove');
-            fetch('event_editors_action.php', { method: 'POST', body: fd }).then(r => r.json()).then(data => {
+            adminFetchJson('event_editors_action' + ADMIN_FETCH_EXT, { method: 'POST', body: fd }).then(data => {
                 if (data.status === 'success') {
                     btn.closest('.d-flex').remove();
                     const list = document.getElementById('editorsList');
@@ -909,7 +942,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                 } else {
                     Swal.fire('Error', data.message || 'Failed', 'error');
                 }
-            });
+            }).catch(err => Swal.fire('Error', err.message || 'Failed', 'error'));
         }
 
         function uploadCertificate(userId, type, input) {
@@ -924,13 +957,13 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
             fd.append('user_id', userId);
             fd.append('type', type);
             fd.append('certificate', file);
-            fetch('upload_certificate.php', { method: 'POST', body: fd }).then(r => r.json()).then(data => {
+            adminFetchJson('upload_certificate' + ADMIN_FETCH_EXT, { method: 'POST', body: fd }).then(data => {
                 if (data.status === 'success') {
                     Swal.fire('Done', 'Certificate uploaded.', 'success').then(() => location.reload());
                 } else {
                     Swal.fire('Error', data.message || 'Upload failed', 'error');
                 }
-            });
+            }).catch(err => Swal.fire('Error', err.message || 'Upload failed', 'error'));
         }
 
         function setWinner(userId, fullName, isWinner, btn) {
@@ -954,7 +987,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                 'event_id=' + encodeURIComponent(eid) +
                 '&winner_op=' + encodeURIComponent(winnerOp) +
                 '&winner_uid=' + encodeURIComponent(uid);
-            fetch('event_winners_action.php?' + qs, { method: 'POST', body: fd }).then(r => r.json()).then(data => {
+            adminFetchJson('event_winners_action' + ADMIN_FETCH_EXT + '?' + qs, { method: 'POST', body: fd }).then(data => {
                 if (data.status === 'success') {
                     if (isWinner) {
                         Swal.fire('Winner removed', fullName + ' has been removed from winners.', 'success').then(() => location.reload());
@@ -965,7 +998,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                 } else {
                     Swal.fire('Error', data.message || 'Failed', 'error');
                 }
-            });
+            }).catch(err => Swal.fire('Error', err.message || 'Failed', 'error'));
         }
     </script>
 </body>

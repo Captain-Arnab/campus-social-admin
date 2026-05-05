@@ -39,7 +39,8 @@ if ($editors_result) {
 $exclude_ids = array_unique($exclude_ids);
 $exclude_sql = implode(',', array_map('intval', $exclude_ids));
 
-$sql = "SELECT id, full_name, email FROM users WHERE status = 'active' AND id NOT IN ($exclude_sql)";
+// Faculty coordinators: only faculty accounts (is_student = 0), matching the UI label
+$sql = "SELECT id, full_name, email FROM users WHERE status = 'active' AND is_student = 0 AND id NOT IN ($exclude_sql)";
 if ($search !== '') {
     $search_esc = $conn->real_escape_string($search);
     $sql .= " AND (full_name LIKE '%$search_esc%' OR email LIKE '%$search_esc%')";

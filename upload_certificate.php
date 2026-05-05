@@ -33,8 +33,50 @@ if (!$ev || !events_row_is_fully_past($ev)) {
 const MAX_SIZE = 5 * 1024 * 1024; // 5 MB
 $allowed = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
 
+/**
+ * Many shared hosts disable ext-fileinfo; avoid fatal error and still validate uploads.
+ */
+function certificate_detect_mime(string $tmp): ?string
+{
+    if (class_exists('finfo')) {
+        $fi = new finfo(FILEINFO_MIME_TYPE);
+        $m = $fi->file($tmp);
+        if (is_string($m) && $m !== '') {
+            return $m;
+        }
+    }
+    if (function_exists('mime_content_type')) {
+        $m = @mime_content_type($tmp);
+        if (is_string($m) && $m !== '') {
+            return $m;
+        }
+    }
+    $head = @file_get_contents($tmp, false, null, 0, 12);
+    if ($head !== false && strlen($head) >= 4 && strncmp($head, '%PDF', 4) === 0) {
+        return 'application/pdf';
+    }
+    if (function_exists('getimagesize')) {
+        $info = @getimagesize($tmp);
+        if ($info !== false && !empty($info['mime'])) {
+            return (string) $info['mime'];
+        }
+    }
+    return null;
+}
+
 if (!isset($_FILES['certificate']) || $_FILES['certificate']['error'] !== UPLOAD_ERR_OK) {
-    echo json_encode(['status' => 'error', 'message' => 'No file or upload error']);
+    $err = $_FILES['certificate']['error'] ?? UPLOAD_ERR_NO_FILE;
+    $msg = 'No file or upload error';
+    if ($err === UPLOAD_ERR_INI_SIZE || $err === UPLOAD_ERR_FORM_SIZE) {
+        $msg = 'Upload rejected by server size limit (check PHP upload_max_filesize / post_max_size)';
+    } elseif ($err === UPLOAD_ERR_PARTIAL) {
+        $msg = 'File was only partially uploaded';
+    } elseif ($err === UPLOAD_ERR_NO_TMP_DIR) {
+        $msg = 'Server missing temporary folder for uploads';
+    } elseif ($err === UPLOAD_ERR_CANT_WRITE) {
+        $msg = 'Server could not write file to disk';
+    }
+    echo json_encode(['status' => 'error', 'message' => $msg]);
     exit();
 }
 
@@ -44,25 +86,40 @@ if ($file['size'] > MAX_SIZE) {
     exit();
 }
 
-$finfo = new finfo(FILEINFO_MIME_TYPE);
-$mime = $finfo->file($file['tmp_name']);
-if (!in_array($mime, $allowed)) {
+$mime = certificate_detect_mime($file['tmp_name']);
+if ($mime === null) {
+    echo json_encode(['status' => 'error', 'message' => 'Could not detect file type. Use PDF or JPEG/PNG/GIF/WebP, or enable the PHP fileinfo extension on the server.']);
+    exit();
+}
+if ($mime === 'image/jpg') {
+    $mime = 'image/jpeg';
+}
+if (!in_array($mime, $allowed, true)) {
     echo json_encode(['status' => 'error', 'message' => 'Only PDF and images (JPEG, PNG, GIF, WebP) allowed']);
     exit();
 }
 
 $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
-if (!preg_match('/^[a-z0-9]+$/i', $ext)) $ext = 'pdf';
+if (!preg_match('/^[a-z0-9]+$/i', $ext)) {
+    $ext = $mime === 'application/pdf' ? 'pdf' : 'jpg';
+}
 $dir = __DIR__ . '/uploads/certificates';
 if (!is_dir($dir)) {
-    mkdir($dir, 0777, true);
+    if (!@mkdir($dir, 0755, true)) {
+        echo json_encode(['status' => 'error', 'message' => 'Could not create uploads folder (check permissions on admin/uploads).']);
+        exit();
+    }
+}
+if (!is_writable($dir)) {
+    echo json_encode(['status' => 'error', 'message' => 'Upload folder is not writable by the web server (chmod admin/uploads/certificates).']);
+    exit();
 }
 $filename = 'cert_' . $event_id . '_' . $user_id . '_' . $type . '_' . time() . '.' . strtolower($ext);
 $path = $dir . '/' . $filename;
 $relative_path = 'uploads/certificates/' . $filename;
 
 if (!move_uploaded_file($file['tmp_name'], $path)) {
-    echo json_encode(['status' => 'error', 'message' => 'Failed to save file']);
+    echo json_encode(['status' => 'error', 'message' => 'Failed to save file (check disk space and open_basedir restrictions).']);
     exit();
 }
 
