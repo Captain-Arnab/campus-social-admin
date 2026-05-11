@@ -101,8 +101,27 @@ $posts = $conn->query("SELECT * FROM ad_posts ORDER BY sort_order ASC, created_a
     <style>
         :root { --brand-color: #FF5F15; --brand-soft: rgba(255, 95, 21, 0.08); --bg-body: #f8f9fd; }
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-body); }
-        .main-content { margin-left: 280px; padding: 30px; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 15px; } }
+        .main-content { margin-left: 280px; padding: 30px; box-sizing: border-box; width: 100%; max-width: 100%; }
+        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; } }
+        @media (min-width: 768px) {
+            .ad-posts-new-btn { width: auto !important; }
+        }
+        @media (max-width: 767.98px) {
+            .card-custom { border-radius: 14px; }
+            .card-custom .table-responsive {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: thin;
+            }
+            .card-custom table {
+                width: 100%;
+                min-width: 720px;
+                font-size: 0.875rem;
+            }
+            .card-custom table thead th { white-space: nowrap; letter-spacing: 0.04em; }
+            .card-custom table td, .card-custom table th { vertical-align: middle; }
+            .ad-url-line { max-width: none !important; }
+        }
         .card-custom { background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.04); border: 1px solid #f0f0f0; margin-bottom: 25px; }
         .btn-brand { background: var(--brand-color); color: white; border: none; border-radius: 10px; font-weight: 600; }
         .btn-brand:hover { background: #e04e0b; color: white; }
@@ -114,12 +133,12 @@ $posts = $conn->query("SELECT * FROM ad_posts ORDER BY sort_order ASC, created_a
 <body>
     <?php include 'sidebar.php'; ?>
     <div class="main-content">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div>
+        <div class="d-flex flex-column flex-md-row gap-3 justify-content-md-between align-items-md-center mb-4">
+            <div class="min-w-0">
                 <h5 class="fw-bold m-0">Advertisement Posts</h5>
                 <p class="text-muted small m-0">Manage home screen banners and ads for the app</p>
             </div>
-            <button class="btn btn-brand" data-bs-toggle="modal" data-bs-target="#createAdModal">
+            <button type="button" class="btn btn-brand w-100 ad-posts-new-btn flex-shrink-0" data-bs-toggle="modal" data-bs-target="#createAdModal">
                 <i class="fas fa-plus me-2"></i>New Ad Post
             </button>
         </div>
@@ -133,7 +152,7 @@ $posts = $conn->query("SELECT * FROM ad_posts ORDER BY sort_order ASC, created_a
 
         <div class="card-custom">
             <div class="table-responsive">
-                <table class="table table-hover mb-0">
+                <table class="table table-hover mb-0 w-100">
                     <thead>
                         <tr>
                             <th class="ps-4" style="font-size:0.7rem;text-transform:uppercase;color:#a0a0a0;">Order</th>
@@ -170,7 +189,7 @@ $posts = $conn->query("SELECT * FROM ad_posts ORDER BY sort_order ASC, created_a
                                 <td>
                                     <div class="fw-bold" style="font-size:0.9rem;"><?php echo htmlspecialchars($p['title']); ?></div>
                                     <?php if ($p['link_url']): ?>
-                                    <small class="text-muted text-truncate d-block" style="max-width:200px;"><?php echo htmlspecialchars($p['link_url']); ?></small>
+                                    <small class="text-muted ad-url-line d-block text-break"><?php echo htmlspecialchars($p['link_url']); ?></small>
                                     <?php endif; ?>
                                 </td>
                                 <td>

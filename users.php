@@ -146,18 +146,33 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
         
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-body); color: var(--text-main); }
         .main-content { margin-left: 280px; padding: 40px; transition: 0.3s; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 20px; } }
+        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; } }
 
         .page-header h4 { font-weight: 700; letter-spacing: -0.5px; }
         .count-badge { background: linear-gradient(135deg, var(--brand-color), #ff8a50); color: white; padding: 8px 16px; border-radius: 30px; box-shadow: 0 4px 15px rgba(255, 95, 21, 0.3); font-weight: 600; font-size: 0.9rem; }
 
         /* View Navigation Tabs */
-        .view-tabs { margin-bottom: 30px; border-bottom: 2px solid #f0f0f0; display: flex; gap: 10px; }
-        .view-tab { text-decoration: none; padding: 12px 24px; border-bottom: 3px solid transparent; transition: all 0.3s; font-weight: 600; color: var(--text-muted); }
+        .view-tabs { margin-bottom: 30px; border-bottom: 2px solid #f0f0f0; display: flex; flex-wrap: nowrap; gap: 10px; }
+        .view-tabs-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+        .view-tab { flex: 0 0 auto; white-space: nowrap; text-decoration: none; padding: 12px 18px; border-bottom: 3px solid transparent; transition: all 0.3s; font-weight: 600; color: var(--text-muted); }
         .view-tab:hover { color: var(--brand-color); }
         .view-tab.active { color: var(--brand-color); border-bottom-color: var(--brand-color); }
 
         .filter-card { background: white; border-radius: 20px; padding: 25px; box-shadow: var(--card-shadow); border: none; margin-bottom: 30px; }
+        @media (max-width: 767.98px) {
+            .filter-card { padding: 16px 14px; border-radius: 14px; }
+            .table-responsive {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: thin;
+            }
+            .custom-table {
+                width: 100%;
+                min-width: 680px;
+            }
+            .custom-table thead th { white-space: nowrap; padding-left: 14px !important; font-size: 0.68rem; letter-spacing: 0.04em; }
+            .user-row td { padding: 14px 14px !important; vertical-align: top; }
+        }
         .mui-form-group { position: relative; margin-bottom: 0; }
         .mui-input { width: 100%; padding: 12px 15px; font-size: 0.95rem; font-weight: 500; color: var(--text-main); border: 2px solid #f0f0f0; border-radius: 12px; background-color: #fff; outline: none; transition: all 0.3s ease; height: 52px; appearance: none; }
         .mui-input:focus { border-color: var(--brand-color); box-shadow: 0 0 0 4px rgba(255, 95, 21, 0.1); }
@@ -205,19 +220,16 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
     <?php include 'sidebar.php'; ?>
 
     <div class="main-content">
-        <div class="d-flex justify-content-between align-items-center mb-4 page-header">
-            <div class="d-flex align-items-center">
-                <button class="btn btn-outline-secondary d-lg-none me-3" id="menu-toggle"><i class="fas fa-bars"></i></button>
-                <div>
-                    <h4 class="m-0 text-dark">User Administration</h4>
-                    <p class="text-muted small m-0 mt-1">Manage platform participants and moderation</p>
-                </div>
+        <div class="d-flex flex-column flex-sm-row flex-sm-wrap justify-content-sm-between align-items-sm-center gap-3 mb-4 page-header">
+            <div class="min-w-0">
+                <h4 class="m-0 text-dark">User Administration</h4>
+                <p class="text-muted small m-0 mt-1">Manage platform participants and moderation</p>
             </div>
-            <span class="count-badge" id="userCount"><?php echo $users->num_rows; ?> Users</span>
+            <span class="count-badge align-self-start align-self-sm-center flex-shrink-0" id="userCount"><?php echo $users->num_rows; ?> Users</span>
         </div>
 
         <!-- View Tabs -->
-        <div class="view-tabs">
+        <div class="view-tabs view-tabs-scroll">
             <a href="users.php?view=students" class="view-tab <?php echo ($view == 'students') ? 'active' : ''; ?>">
                 <i class="fas fa-user-graduate me-2"></i>Students
             </a>

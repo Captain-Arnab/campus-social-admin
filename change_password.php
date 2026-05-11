@@ -86,7 +86,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <style>
         body { font-family: 'Plus Jakarta Sans', sans-serif; background: #f8f9fd; }
         .main-content { margin-left: 280px; padding: 40px; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 20px; } }
+        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; box-sizing: border-box; width: 100%; max-width: 100%; } }
     </style>
 </head>
 <body>

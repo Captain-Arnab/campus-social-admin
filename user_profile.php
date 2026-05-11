@@ -67,7 +67,7 @@ $participated_events = $conn->query("
         }
 
         .main-content { margin-left: 280px; padding: 40px; transition: 0.3s; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 20px; } }
+        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; box-sizing: border-box; width: 100%; max-width: 100%; } }
         
         .profile-card { background: white; border-radius: 24px; border: none; box-shadow: var(--card-shadow); overflow: hidden; }
         .profile-header { background: linear-gradient(135deg, #FF5F15 0%, #FF8A50 100%); padding: 45px; color: white; position: relative; }

@@ -11,13 +11,46 @@ if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
 require_priv('events');
 
 $view = isset($_GET['view']) ? $_GET['view'] : 'live';
-$search_query = isset($_GET['search']) ? $_GET['search'] : '';
-$category_filter = isset($_GET['category']) ? $_GET['category'] : '';
-$date_filter = isset($_GET['date']) ? $_GET['date'] : '';
+$search_query = isset($_GET['search']) ? trim((string) $_GET['search']) : '';
+$category_filter = isset($_GET['category']) ? trim((string) $_GET['category']) : '';
+$date_filter = isset($_GET['date']) ? trim((string) $_GET['date']) : '';
+
+/**
+ * Shared filter fragment for events list + AJAX (search, category, date range).
+ */
+function events_page_filter_sql(mysqli $conn, string $view, string $search_query, string $category_filter, string $date_filter): string
+{
+    $filter_sql = '';
+    if ($search_query !== '') {
+        $s = $conn->real_escape_string($search_query);
+        $filter_sql .= " AND (e.title LIKE '%$s%' OR u.full_name LIKE '%$s%' OR e.venue LIKE '%$s%')";
+    }
+    if ($category_filter !== '') {
+        $c = $conn->real_escape_string($category_filter);
+        $filter_sql .= " AND e.category = '$c'";
+    }
+    if ($date_filter !== '' && $view !== 'hold' && $view !== 'pending') {
+        $d_esc = $conn->real_escape_string($date_filter);
+        $dates = preg_split('/\s+to\s+/i', $d_esc);
+        if (count($dates) === 2) {
+            $a = $conn->real_escape_string(trim($dates[0]));
+            $b = $conn->real_escape_string(trim($dates[1]));
+            if ($a !== '' && $b !== '') {
+                $filter_sql .= " AND DATE(e.event_date) BETWEEN '$a' AND '$b'";
+            }
+        } else {
+            $single = $conn->real_escape_string(trim($dates[0]));
+            if ($single !== '') {
+                $filter_sql .= " AND DATE(e.event_date) = '$single'";
+            }
+        }
+    }
+    return $filter_sql;
+}
 
 // 1. AJAX HANDLER - Real-time filtering
 if (isset($_GET['ajax_filter'])) {
-    $filter_sql = "";
+    $filter_sql = events_page_filter_sql($conn, $view, $search_query, $category_filter, $date_filter);
     
     $date_condition = "";
     if ($view == 'pending') {
@@ -32,17 +65,6 @@ if (isset($_GET['ajax_filter'])) {
         $date_condition = 'AND ' . events_sql_not_past($conn, 'e') . " AND e.status = 'approved'";
     }
 
-    if (!empty($search_query)) $filter_sql .= " AND (e.title LIKE '%$search_query%' OR u.full_name LIKE '%$search_query%')";
-    if (!empty($category_filter)) $filter_sql .= " AND e.category = '$category_filter'";
-    if (!empty($date_filter) && $view != 'hold' && $view != 'pending') {
-        $dates = explode(" to ", $date_filter);
-        if(count($dates) == 2) {
-            $filter_sql .= " AND DATE(e.event_date) BETWEEN '$dates[0]' AND '$dates[1]'";
-        } else {
-            $filter_sql .= " AND DATE(e.event_date) = '$dates[0]'";
-        }
-    }
-
     $order_by = ($view == 'pending') ? "e.created_at DESC" : "e.event_date DESC";
     $sql = "SELECT e.*, u.full_name as organizer_name 
             FROM events e 
@@ -52,7 +74,7 @@ if (isset($_GET['ajax_filter'])) {
             
     $events = $conn->query($sql);
 
-    if ($events->num_rows > 0) {
+    if ($events && $events->num_rows > 0) {
         while($row = $events->fetch_assoc()) {
             $banners = json_decode($row['banners'] ?? '[]');
             ?>
@@ -60,20 +82,20 @@ if (isset($_GET['ajax_filter'])) {
                 <td class="ps-4">
                     <input type="checkbox" class="form-check-input event-checkbox" value="<?php echo $row['id']; ?>" style="cursor: pointer;">
                 </td>
-                <td>
-                    <div class="d-flex align-items-center">
-                        <div class="thumbnail-mini me-3">
+                <td class="min-w-0">
+                    <div class="d-flex align-items-start gap-2">
+                        <div class="thumbnail-mini me-0 flex-shrink-0">
                             <?php if(!empty($banners)): ?>
                                 <img src="../uploads/events/<?php echo $banners[0]; ?>" alt="Event" onerror="this.src='../assets/placeholder.png';">
                             <?php else: ?>
                                 <div class="thumb-fallback"><i class="fas fa-image"></i></div>
                             <?php endif; ?>
                         </div>
-                        <div>
-                            <div class="fw-bold text-dark mb-0" style="font-size: 0.9rem;"><?php echo $row['title']; ?></div>
-                            <small class="text-muted" style="font-size: 0.75rem;"><i class="fas fa-user-circle me-1"></i><?php echo $row['organizer_name']; ?></small>
+                        <div class="min-w-0 flex-grow-1">
+                            <div class="fw-bold text-dark mb-0 event-title-text" style="font-size: 0.9rem;"><?php echo htmlspecialchars($row['title']); ?></div>
+                            <small class="text-muted event-organizer-line d-block" style="font-size: 0.75rem;"><i class="fas fa-user-circle me-1"></i><?php echo htmlspecialchars($row['organizer_name']); ?></small>
                             <?php if($row['status'] == 'hold' && $row['hold_reason']): ?>
-                            <small class="text-warning" style="font-size: 0.7rem;"><i class="fas fa-info-circle me-1"></i><?php echo $row['hold_reason']; ?></small>
+                            <small class="text-warning d-block mt-1" style="font-size: 0.7rem;"><i class="fas fa-info-circle me-1"></i><?php echo htmlspecialchars($row['hold_reason']); ?></small>
                             <?php endif; ?>
                         </div>
                     </div>
@@ -129,6 +151,7 @@ if (isset($_GET['ajax_filter'])) {
 }
 
 // Initial Load logic
+$filter_sql_initial = events_page_filter_sql($conn, $view, $search_query, $category_filter, $date_filter);
 $date_condition = "";
 if ($view == 'pending') {
     $date_condition = "AND e.status = 'pending'";
@@ -143,7 +166,7 @@ if ($view == 'pending') {
 }
 
 $order_by = ($view == 'pending') ? "e.created_at DESC" : "e.event_date DESC";
-$sql = "SELECT e.*, u.full_name as organizer_name FROM events e JOIN users u ON e.organizer_id = u.id WHERE 1=1 $date_condition ORDER BY $order_by";
+$sql = "SELECT e.*, u.full_name as organizer_name FROM events e JOIN users u ON e.organizer_id = u.id WHERE 1=1 $date_condition $filter_sql_initial ORDER BY $order_by";
 $events = $conn->query($sql);
 $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY category ASC");
 ?>
@@ -173,8 +196,8 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
             color: #2d3436;
         }
 
-        .main-content { margin-left: 280px; padding: 30px; transition: 0.3s; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 15px; } }
+        .main-content { margin-left: 280px; padding: 30px; transition: 0.3s; box-sizing: border-box; width: 100%; max-width: 100%; }
+        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; } }
 
         /* Bulk Download Section */
         .bulk-actions-bar {
@@ -254,6 +277,68 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
 
         .btn-search { background: var(--brand-color); color: white; border: none; border-radius: 10px; height: 48px; font-weight: 700; font-size: 0.9rem; }
         .btn-reset { background: #f1f3f5; color: #636e72; border: none; border-radius: 10px; height: 48px; font-weight: 600; font-size: 0.9rem; }
+
+        .events-page-header { gap: 0.75rem; }
+        @media (max-width: 767.98px) {
+            /* Let the table keep natural column widths — scroll horizontally instead of crushing cells */
+            .events-table-scroll {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: thin;
+            }
+            .events-data-table {
+                width: 100%;
+                min-width: 720px;
+                font-size: 0.875rem;
+            }
+            .events-data-table thead th {
+                white-space: nowrap;
+                letter-spacing: 0.04em;
+                padding-left: 14px;
+                padding-right: 10px;
+            }
+            .filter-card { padding: 16px 12px; border-radius: 14px; }
+            .event-row td { padding: 10px 14px !important; }
+            .event-row td.ps-4 { padding-left: 10px !important; }
+            .event-row td.text-end.pe-4 { padding-right: 10px !important; }
+            .thumbnail-mini { width: 40px; height: 40px; border-radius: 8px; }
+            .event-title-text { word-break: break-word; white-space: normal !important; line-height: 1.35; }
+            .event-organizer-line { white-space: normal !important; }
+            .badge-brand-soft { white-space: nowrap; }
+        }
+
+        .events-view-tabs {
+            display: flex;
+            flex-wrap: nowrap;
+            gap: 0.5rem;
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: thin;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 0;
+        }
+        .events-view-tabs::-webkit-scrollbar { height: 4px; }
+        .events-view-tabs::-webkit-scrollbar-thumb {
+            background: rgba(0,0,0,0.15);
+            border-radius: 4px;
+        }
+        .events-view-tab {
+            flex: 0 0 auto;
+            white-space: nowrap;
+            padding: 10px 10px 12px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+            color: #95a5a6;
+        }
+        .events-view-tab:hover { color: #2d3436; }
+        .events-view-tab.active { font-weight: 700; color: #2d3436; }
+        @media (min-width: 992px) {
+            .events-view-tab { font-size: 0.9rem; padding-left: 12px; padding-right: 12px; }
+        }
     </style>
 </head>
 <body>
@@ -261,37 +346,34 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
     <?php include 'sidebar.php'; ?>
 
     <div class="main-content">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div>
+        <div class="events-page-header d-flex flex-column flex-sm-row flex-sm-wrap justify-content-sm-between align-items-sm-center mb-4">
+            <div class="min-w-0 me-sm-3 mb-2 mb-sm-0">
                 <h5 class="fw-bold m-0 text-dark"><?php echo ucfirst($view); ?> Events</h5>
                 <p class="text-muted small m-0">Manage and monitor student engagement</p>
             </div>
-            <div class="d-flex align-items-center gap-2">
-                <span class="badge bg-white text-dark border px-3 py-2 rounded-pill small fw-bold">
-                    Count: <span id="eventCount"><?php echo $events->num_rows; ?></span>
-                </span>
-                <button class="btn btn-sm btn-outline-secondary d-lg-none" id="menu-toggle"><i class="fas fa-bars"></i></button>
-            </div>
+            <span class="badge bg-white text-dark border px-3 py-2 rounded-pill small fw-bold align-self-start align-self-sm-center flex-shrink-0">
+                Count: <span id="eventCount"><?php echo $events->num_rows; ?></span>
+            </span>
         </div>
 
-        <!-- View Navigation Tabs -->
-        <div style="margin-bottom: 20px; border-bottom: 2px solid #f0f0f0; display: flex; gap: 10px; overflow-x: auto;">
-            <a href="events.php?view=pending" class="text-decoration-none <?php echo ($view == 'pending') ? 'fw-bold text-dark' : 'text-muted'; ?>" style="padding-bottom: 12px; border-bottom: <?php echo ($view == 'pending') ? '3px solid #e67e22' : 'none'; ?> ;">
+        <!-- View navigation: horizontal scroll + no wrap so labels are not split mid-phrase on small screens -->
+        <nav class="events-view-tabs" aria-label="Event list views">
+            <a href="events.php?view=pending" class="events-view-tab text-decoration-none <?php echo ($view == 'pending') ? 'active' : ''; ?>" style="<?php echo ($view == 'pending') ? 'border-bottom:3px solid #e67e22;color:#2d3436;' : ''; ?>">
                 <i class="fas fa-hourglass-half me-1"></i>Pending Approval
             </a>
-            <a href="events.php?view=live" class="text-decoration-none <?php echo ($view == 'live') ? 'fw-bold text-dark' : 'text-muted'; ?>" style="padding-bottom: 12px; border-bottom: <?php echo ($view == 'live') ? '3px solid #FF5F15' : 'none'; ?> ;">
+            <a href="events.php?view=live" class="events-view-tab text-decoration-none <?php echo ($view == 'live') ? 'active' : ''; ?>" style="<?php echo ($view == 'live') ? 'border-bottom:3px solid #FF5F15;color:#2d3436;' : ''; ?>">
                 <i class="fas fa-play-circle me-1"></i>Live Events
             </a>
-            <a href="events.php?view=hold" class="text-decoration-none <?php echo ($view == 'hold') ? 'fw-bold text-dark' : 'text-muted'; ?>" style="padding-bottom: 12px; border-bottom: <?php echo ($view == 'hold') ? '3px solid #f39c12' : 'none'; ?> ;">
+            <a href="events.php?view=hold" class="events-view-tab text-decoration-none <?php echo ($view == 'hold') ? 'active' : ''; ?>" style="<?php echo ($view == 'hold') ? 'border-bottom:3px solid #f39c12;color:#2d3436;' : ''; ?>">
                 <i class="fas fa-pause-circle me-1"></i>On Hold
             </a>
-            <a href="events.php?view=past" class="text-decoration-none <?php echo ($view == 'past') ? 'fw-bold text-dark' : 'text-muted'; ?>" style="padding-bottom: 12px; border-bottom: <?php echo ($view == 'past') ? '3px solid #3498db' : 'none'; ?> ;">
+            <a href="events.php?view=past" class="events-view-tab text-decoration-none <?php echo ($view == 'past') ? 'active' : ''; ?>" style="<?php echo ($view == 'past') ? 'border-bottom:3px solid #3498db;color:#2d3436;' : ''; ?>">
                 <i class="fas fa-history me-1"></i>Past Events
             </a>
-            <a href="events.php?view=archive" class="text-decoration-none <?php echo ($view == 'archive') ? 'fw-bold text-dark' : 'text-muted'; ?>" style="padding-bottom: 12px; border-bottom: <?php echo ($view == 'archive') ? '3px solid #95a5a6' : 'none'; ?> ;">
+            <a href="events.php?view=archive" class="events-view-tab text-decoration-none <?php echo ($view == 'archive') ? 'active' : ''; ?>" style="<?php echo ($view == 'archive') ? 'border-bottom:3px solid #95a5a6;color:#2d3436;' : ''; ?>">
                 <i class="fas fa-archive me-1"></i>Archive
             </a>
-        </div>
+        </nav>
 
         <!-- Bulk Actions Bar -->
         <?php if (has_priv('reports')): ?>
@@ -321,7 +403,7 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
             <div class="row g-3 align-items-center">
                 <div class="col-lg-4 col-md-6">
                     <div class="mui-form-group">
-                        <input type="text" id="searchInput" class="mui-input" placeholder=" ">
+                        <input type="text" id="searchInput" class="mui-input" placeholder=" " value="<?php echo htmlspecialchars($search_query, ENT_QUOTES, 'UTF-8'); ?>">
                         <label class="mui-label">Event or Organizer</label>
                     </div>
                 </div>
@@ -329,7 +411,14 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
                     <div class="mui-form-group">
                         <select id="categoryInput" class="mui-input">
                             <option value="">All Categories</option>
-                            <?php while($cat = $categories->fetch_assoc()) echo "<option value='{$cat['category']}'>{$cat['category']}</option>"; ?>
+                            <?php
+                            $cat_sel = htmlspecialchars($category_filter, ENT_QUOTES, 'UTF-8');
+                            while ($cat = $categories->fetch_assoc()) {
+                                $cv = htmlspecialchars((string) $cat['category'], ENT_QUOTES, 'UTF-8');
+                                $sel = ($category_filter !== '' && $category_filter === (string) $cat['category']) ? ' selected' : '';
+                                echo "<option value=\"{$cv}\"{$sel}>{$cv}</option>";
+                            }
+                            ?>
                         </select>
                         <label class="mui-label">Category</label>
                     </div>
@@ -347,8 +436,8 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
             </div>
         </div>
 
-        <div class="table-responsive">
-            <table class="table custom-table mb-0 text-nowrap">
+        <div class="table-responsive events-table-scroll">
+            <table class="table custom-table mb-0 events-data-table">
                 <thead>
                     <tr>
                         <th><input type="checkbox" id="selectAll" class="form-check-input" style="cursor: pointer;"></th>
@@ -368,18 +457,18 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
                             <td class="ps-4">
                                 <input type="checkbox" class="form-check-input event-checkbox" value="<?php echo $row['id']; ?>" style="cursor: pointer;">
                             </td>
-                            <td>
-                                <div class="d-flex align-items-center">
-                                    <div class="thumbnail-mini me-3">
+                            <td class="min-w-0">
+                                <div class="d-flex align-items-start gap-2">
+                                    <div class="thumbnail-mini me-0 flex-shrink-0">
                                         <?php if(!empty($banners)): ?>
                                             <img src="../uploads/events/<?php echo $banners[0]; ?>" alt="Thumb" onerror="this.parentElement.innerHTML='<div class=\'thumb-fallback\'><i class=\'fas fa-image\'></i></div>';">
                                         <?php else: ?>
                                             <div class="thumb-fallback"><i class="fas fa-image"></i></div>
                                         <?php endif; ?>
                                     </div>
-                                    <div>
-                                        <div class="fw-bold text-dark mb-0" style="font-size: 0.9rem;"><?php echo $row['title']; ?></div>
-                                        <small class="text-muted" style="font-size: 0.75rem;"><i class="fas fa-user-circle me-1"></i><?php echo $row['organizer_name']; ?></small>
+                                    <div class="min-w-0 flex-grow-1">
+                                        <div class="fw-bold text-dark mb-0 event-title-text" style="font-size: 0.9rem;"><?php echo htmlspecialchars($row['title']); ?></div>
+                                        <small class="text-muted event-organizer-line d-block" style="font-size: 0.75rem;"><i class="fas fa-user-circle me-1"></i><?php echo htmlspecialchars($row['organizer_name']); ?></small>
                                     </div>
                                 </div>
                             </td>
@@ -429,6 +518,14 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script>
         const fp = flatpickr("#dateInput", { mode: "range", dateFormat: "Y-m-d" });
+        <?php if ($date_filter !== ''): ?>
+        (function initDateFromServer() {
+            const raw = <?php echo json_encode($date_filter); ?>;
+            const parts = raw.split(/\s+to\s+/i).map(s => s.trim()).filter(Boolean);
+            if (parts.length === 2) fp.setDate([parts[0], parts[1]], true);
+            else if (parts.length === 1) fp.setDate(parts[0], true);
+        })();
+        <?php endif; ?>
         const sIn = document.getElementById('searchInput');
         const cIn = document.getElementById('categoryInput');
         const dIn = document.getElementById('dateInput');
@@ -439,6 +536,9 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
             fetch(url).then(res => res.text()).then(data => { 
                 tBody.innerHTML = data; 
                 updateCheckboxListeners();
+                const n = tBody.querySelectorAll('tr.event-row').length;
+                const ec = document.getElementById('eventCount');
+                if (ec) ec.textContent = String(n);
             });
         }
 
@@ -505,11 +605,6 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
 
         // Initialize checkbox listeners on page load
         updateCheckboxListeners();
-
-        document.getElementById('menu-toggle')?.addEventListener('click', () => {
-            document.getElementById('sidebar-wrapper').classList.add('active');
-            document.getElementById('sidebar-backdrop').style.display = 'block';
-        });
     </script>
 </body>
 </html>

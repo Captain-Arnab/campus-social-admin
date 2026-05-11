@@ -246,13 +246,15 @@ if ($user_type == 'admin') {
         color: var(--primary-color);
     }
 
+    /* Top-right on small screens so it does not cover titles, filters, or table text */
     .mobile-menu-toggle {
         position: fixed;
-        top: 20px;
-        left: 20px;
+        top: max(0.75rem, env(safe-area-inset-top, 0px));
+        left: auto;
+        right: max(0.75rem, env(safe-area-inset-right, 0px));
         z-index: 1049;
-        width: 50px;
-        height: 50px;
+        width: 48px;
+        height: 48px;
         border-radius: 12px;
         background: var(--primary-color);
         border: none;
@@ -275,6 +277,32 @@ if ($user_type == 'admin') {
     @media (min-width: 992px) {
         .mobile-menu-toggle {
             display: none;
+        }
+    }
+
+    /*
+     * Desktop (sidebar visible): never use width:100% together with margin-left:280px — that is
+     * wider than the viewport and forces a horizontal scrollbar on the whole page (e.g. 1024px).
+     * Table/list horizontal scroll stays inside page components via their own max-width breakpoints.
+     */
+    @media (min-width: 992px) {
+        .main-content {
+            width: calc(100% - 280px);
+            max-width: calc(100% - 280px);
+            box-sizing: border-box;
+        }
+    }
+
+    /* Mobile: full-width column; keep right inset so text does not sit under the fixed menu button */
+    @media (max-width: 991.98px) {
+        .main-content {
+            box-sizing: border-box;
+            width: 100%;
+            max-width: 100%;
+            padding-top: max(0.75rem, env(safe-area-inset-top, 0px)) !important;
+            padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px)) !important;
+            padding-left: max(0.75rem, env(safe-area-inset-left, 0px)) !important;
+            padding-right: calc(env(safe-area-inset-right, 0px) + 3.5rem) !important;
         }
     }
 </style>

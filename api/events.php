@@ -29,11 +29,67 @@ function events_api_enrich_event_row(array &$row): void
     $row['share_text'] = $title . ' — ' . $row['share_url'];
 }
 
+/**
+ * Search string from GET: clients use different keys (search, q, query, keyword, text).
+ */
+function events_api_get_search_string(): string
+{
+    foreach (['search', 'q', 'query', 'keyword', 'text'] as $key) {
+        if (!isset($_GET[$key])) {
+            continue;
+        }
+        $v = trim((string) $_GET[$key]);
+        if ($v !== '') {
+            return $v;
+        }
+    }
+    return '';
+}
+
+/**
+ * SQL AND clause for event discovery: name, description, venue, category, rules, organizer.
+ * Multi-word queries require each token to match at least one of those fields (AND across tokens).
+ */
+function events_api_search_sql_fragment(mysqli $conn, string $raw): string
+{
+    $raw = trim($raw);
+    if ($raw === '') {
+        return '';
+    }
+    if (function_exists('mb_strlen') && mb_strlen($raw, 'UTF-8') > 200) {
+        $raw = mb_substr($raw, 0, 200, 'UTF-8');
+    } elseif (strlen($raw) > 200) {
+        $raw = substr($raw, 0, 200);
+    }
+    $tokens = preg_split('/\s+/u', $raw, -1, PREG_SPLIT_NO_EMPTY);
+    if ($tokens === false || $tokens === []) {
+        $tokens = [$raw];
+    }
+    $tokenConds = [];
+    foreach ($tokens as $tok) {
+        if (function_exists('mb_strlen') && mb_strlen($tok, 'UTF-8') > 128) {
+            $tok = mb_substr($tok, 0, 128, 'UTF-8');
+        } elseif (strlen($tok) > 128) {
+            $tok = substr($tok, 0, 128);
+        }
+        $e = $conn->real_escape_string($tok);
+        $tokenConds[] = "(
+            e.title LIKE '%$e%'
+            OR e.description LIKE '%$e%'
+            OR e.venue LIKE '%$e%'
+            OR e.category LIKE '%$e%'
+            OR IFNULL(e.rules, '') LIKE '%$e%'
+            OR u.full_name LIKE '%$e%'
+        )";
+    }
+    return ' AND (' . implode(' AND ', $tokenConds) . ')';
+}
+
 // --- 1. GET EVENTS ---
 if ($method == 'GET') {
     $view = isset($_GET['type']) ? $_GET['type'] : 'live';
-    $search_query = isset($_GET['search']) ? $_GET['search'] : '';
-    $category_filter = isset($_GET['category']) ? $_GET['category'] : '';
+    $search_query = events_api_get_search_string();
+    $category_filter = isset($_GET['category']) ? trim((string) $_GET['category']) : '';
     $user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
     $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 
@@ -167,14 +223,13 @@ if ($method == 'GET') {
             $sql .= ' AND ' . events_sql_not_past($conn, 'e');
         }
 
-        if (!empty($search_query)) {
-            $search_query = $conn->real_escape_string($search_query);
-            $sql .= " AND (e.title LIKE '%$search_query%' OR u.full_name LIKE '%$search_query%' OR e.venue LIKE '%$search_query%')";
+        if ($search_query !== '') {
+            $sql .= events_api_search_sql_fragment($conn, $search_query);
         }
 
-        if (!empty($category_filter)) {
-            $category_filter = $conn->real_escape_string($category_filter);
-            $sql .= " AND e.category = '$category_filter'";
+        if ($category_filter !== '') {
+            $category_esc = $conn->real_escape_string($category_filter);
+            $sql .= " AND e.category = '$category_esc'";
         }
     }
 

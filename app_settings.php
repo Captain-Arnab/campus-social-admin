@@ -66,10 +66,21 @@ if ($logo_res && $row = $logo_res->fetch_assoc()) {
     <style>
         :root { --brand-color: #FF5F15; --brand-soft: rgba(255, 95, 21, 0.08); --bg-body: #f8f9fd; }
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-body); }
-        .main-content { margin-left: 280px; padding: 30px; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 15px; } }
+        .main-content { margin-left: 280px; padding: 30px; box-sizing: border-box; width: 100%; max-width: 100%; }
+        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; } }
         .settings-card { background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.04); border: 1px solid #f0f0f0; padding: 30px; margin-bottom: 25px; }
         .logo-preview { width: 200px; height: 200px; border-radius: 16px; border: 2px dashed #ddd; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #fafafa; }
+        @media (max-width: 767.98px) {
+            .settings-card { padding: 16px 14px; border-radius: 14px; }
+            .logo-preview {
+                width: min(100%, 220px);
+                height: auto;
+                aspect-ratio: 1;
+                max-width: 100%;
+                margin-left: auto;
+                margin-right: auto;
+            }
+        }
         .logo-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
         .btn-brand { background: var(--brand-color); color: white; border: none; border-radius: 10px; font-weight: 600; padding: 10px 24px; }
         .btn-brand:hover { background: #e04e0b; color: white; }
@@ -95,8 +106,8 @@ if ($logo_res && $row = $logo_res->fetch_assoc()) {
         <div class="settings-card">
             <h6 class="fw-bold mb-3"><i class="fas fa-mobile-alt text-primary me-2"></i> App Logo</h6>
             <p class="text-muted small">Upload a new logo for the Android app. This logo will be fetched by the app dynamically. Recommended size: 512x512 px, PNG or JPEG.</p>
-            <div class="row align-items-center">
-                <div class="col-auto">
+            <div class="row align-items-center g-4">
+                <div class="col-12 col-sm-auto d-flex justify-content-center justify-content-sm-start">
                     <div class="logo-preview" id="logoPreview">
                         <?php if ($current_logo && $current_logo !== 'default_logo.png'): ?>
                             <img src="<?php echo htmlspecialchars($current_logo); ?>" alt="App Logo" id="previewImg">
@@ -108,7 +119,7 @@ if ($logo_res && $row = $logo_res->fetch_assoc()) {
                         <?php endif; ?>
                     </div>
                 </div>
-                <div class="col">
+                <div class="col-12 col-sm min-w-0">
                     <form method="POST" enctype="multipart/form-data">
                         <input type="hidden" name="action" value="update_logo">
                         <div class="mb-3">

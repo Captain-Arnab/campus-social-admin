@@ -61,12 +61,23 @@ $hold_requests = $conn->query("
         }
         
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-body); color: #2d3436; }
-        .main-content { margin-left: 280px; padding: 40px; transition: 0.3s; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 20px; } }
+        .main-content { margin-left: 280px; padding: 40px; transition: 0.3s; box-sizing: border-box; width: 100%; max-width: 100%; }
+        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; } }
 
-        .stat-card { border: none; border-radius: 24px; color: white; padding: 30px; box-shadow: var(--card-shadow); position: relative; overflow: hidden; transition: 0.3s; }
+        .stat-card { border: none; border-radius: 24px; color: white; padding: 22px 24px; box-shadow: var(--card-shadow); position: relative; overflow: hidden; transition: 0.3s; min-height: 120px; }
+        @media (min-width: 992px) {
+            .stat-card { padding: 30px; min-height: 0; }
+        }
         .stat-card:hover { transform: translateY(-5px); }
-        .stat-card .icon-overlay { position: absolute; right: -15px; bottom: -15px; font-size: 6rem; opacity: 0.15; transform: rotate(-10deg); }
+        .stat-card .icon-overlay { position: absolute; right: -15px; bottom: -15px; font-size: 4.5rem; opacity: 0.15; transform: rotate(-10deg); }
+        @media (min-width: 576px) {
+            .stat-card .icon-overlay { font-size: 5.5rem; }
+        }
+        @media (min-width: 992px) {
+            .stat-card .icon-overlay { font-size: 6rem; }
+        }
+        .stat-card .stat-value { font-size: clamp(1.75rem, 5vw, 3rem); line-height: 1.1; font-weight: 700; }
+        .stat-card small { font-size: clamp(0.65rem, 2vw, 0.75rem); }
         
         .bg-orange-grad { background: linear-gradient(135deg, #FF5F15 0%, #FF9068 100%); }
         .bg-hold-grad { background: linear-gradient(135deg, #f39c12 0%, #f1c40f 100%); }
@@ -74,6 +85,10 @@ $hold_requests = $conn->query("
         .bg-info-grad { background: linear-gradient(135deg, #0984e3 0%, #74b9ff 100%); }
 
         .pending-card { background: white; border-radius: 20px; padding: 25px; box-shadow: var(--card-shadow); border: none; margin-bottom: 15px; transition: 0.3s; }
+        @media (max-width: 767.98px) {
+            .main-content { box-sizing: border-box; max-width: 100%; }
+            .pending-card { padding: 16px 14px; border-radius: 16px; }
+        }
         .pending-card:hover { transform: scale(1.01); box-shadow: 0 15px 40px rgba(0,0,0,0.08); }
         
         .category-pill { background: var(--brand-soft); color: var(--brand-color); padding: 4px 12px; border-radius: 30px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; }
@@ -90,37 +105,44 @@ $hold_requests = $conn->query("
     <?php include 'sidebar.php'; ?>
 
     <div class="main-content">
-        <div class="mb-5">
-            <h4 class="fw-bold m-0">Platform Overview</h4>
-            <p class="text-muted small">Real-time engagement and operational statistics</p>
+        <div class="mb-5 d-flex flex-wrap justify-content-between align-items-start gap-3">
+            <div>
+                <h4 class="fw-bold m-0">Platform Overview</h4>
+                <p class="text-muted small mb-0">Real-time engagement and operational statistics</p>
+            </div>
+            <a href="https://micampus.co.in/" target="_blank" rel="noopener noreferrer" class="btn btn-outline-primary rounded-pill fw-semibold px-4 py-2 d-inline-flex align-items-center gap-2 flex-shrink-0" style="border-width: 2px;">
+                <i class="fas fa-globe"></i> MiCampus website
+                <i class="fas fa-external-link-alt small opacity-75"></i>
+            </a>
         </div>
 
-        <div class="row g-4 mb-5">
-            <div class="col-md-3">
+        <!-- xl: four across; lg–xl narrow main column: 2×2 so cards are not clipped (e.g. 1024px viewport with sidebar) -->
+        <div class="row g-3 g-xl-4 mb-5">
+            <div class="col-12 col-sm-6 col-xl-3 min-w-0">
                 <div class="stat-card bg-orange-grad">
                     <small class="text-uppercase fw-bold opacity-75">Needs Review</small>
-                    <h2 class="display-5 fw-bold mb-0 mt-2"><?php echo $pending_events; ?></h2>
+                    <div class="stat-value mt-2 mb-0"><?php echo $pending_events; ?></div>
                     <i class="fas fa-hourglass-half icon-overlay"></i>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-12 col-sm-6 col-xl-3 min-w-0">
                 <div class="stat-card bg-hold-grad">
                     <small class="text-uppercase fw-bold opacity-75">On Hold</small>
-                    <h2 class="display-5 fw-bold mb-0 mt-2"><?php echo $hold_events; ?></h2>
+                    <div class="stat-value mt-2 mb-0"><?php echo $hold_events; ?></div>
                     <i class="fas fa-pause-circle icon-overlay"></i>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-12 col-sm-6 col-xl-3 min-w-0">
                 <div class="stat-card bg-dark-grad">
                     <small class="text-uppercase fw-bold opacity-50">Active Events</small>
-                    <h2 class="display-5 fw-bold mb-0 mt-2"><?php echo $live_events; ?></h2>
+                    <div class="stat-value mt-2 mb-0"><?php echo $live_events; ?></div>
                     <i class="fas fa-broadcast-tower icon-overlay"></i>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-12 col-sm-6 col-xl-3 min-w-0">
                 <div class="stat-card bg-info-grad">
                     <small class="text-uppercase fw-bold opacity-50">App Users</small>
-                    <h2 class="display-5 fw-bold mb-0 mt-2"><?php echo $conn->query("SELECT * FROM users")->num_rows; ?></h2>
+                    <div class="stat-value mt-2 mb-0"><?php echo $conn->query("SELECT * FROM users")->num_rows; ?></div>
                     <i class="fas fa-user-friends icon-overlay"></i>
                 </div>
             </div>
@@ -133,11 +155,11 @@ $hold_requests = $conn->query("
                 <?php while($row = $pending_requests->fetch_assoc()): ?>
                 <div class="col-12">
                     <div class="pending-card d-flex justify-content-between align-items-center flex-wrap gap-3">
-                        <div class="d-flex align-items-center gap-3">
-                            <div class="rounded-circle bg-light d-flex align-items-center justify-content-center" style="width: 50px; height: 50px;">
+                        <div class="d-flex align-items-center gap-3 flex-grow-1 min-w-0">
+                            <div class="rounded-circle bg-light d-flex align-items-center justify-content-center flex-shrink-0" style="width: 50px; height: 50px;">
                                 <i class="fas fa-calendar-plus text-warning"></i>
                             </div>
-                            <div>
+                            <div class="min-w-0">
                                 <span class="category-pill mb-1 d-inline-block"><?php echo $row['category']; ?></span>
                                 <h6 class="fw-bold m-0"><?php echo $row['title']; ?></h6>
                                 <small class="text-muted"><i class="fas fa-user me-1"></i><?php echo $row['organizer_name']; ?> • <i class="far fa-clock me-1"></i><?php echo date('M d, Y', strtotime($row['event_date'])); ?>
@@ -149,7 +171,7 @@ $hold_requests = $conn->query("
                                 ?></small>
                             </div>
                         </div>
-                        <div class="d-flex align-items-center gap-3">
+                        <div class="d-flex align-items-center gap-3 flex-shrink-0">
                             <?php if (has_priv('events')): ?>
                             <a href="event_details.php?id=<?php echo $row['id']; ?>" class="btn-review">
                                 <i class="fas fa-search-plus me-2"></i> Review & Verify
@@ -182,11 +204,11 @@ $hold_requests = $conn->query("
                 <?php while($row = $hold_requests->fetch_assoc()): ?>
                 <div class="col-12">
                     <div class="pending-card d-flex justify-content-between align-items-center flex-wrap gap-3" style="border-left: 4px solid #f39c12;">
-                        <div class="d-flex align-items-center gap-3">
-                            <div class="rounded-circle d-flex align-items-center justify-content-center" style="width: 50px; height: 50px; background: rgba(243, 156, 18, 0.1);">
+                        <div class="d-flex align-items-center gap-3 flex-grow-1 min-w-0">
+                            <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0" style="width: 50px; height: 50px; background: rgba(243, 156, 18, 0.1);">
                                 <i class="fas fa-clock text-warning"></i>
                             </div>
-                            <div>
+                            <div class="min-w-0">
                                 <span class="category-pill hold-pill mb-1 d-inline-block"><?php echo $row['category']; ?></span>
                                 <h6 class="fw-bold m-0"><?php echo $row['title']; ?></h6>
                                 <small class="text-muted">
@@ -202,7 +224,7 @@ $hold_requests = $conn->query("
                                 <?php endif; ?>
                             </div>
                         </div>
-                        <div class="d-flex align-items-center gap-3">
+                        <div class="d-flex align-items-center gap-3 flex-shrink-0">
                             <?php if (has_priv('events')): ?>
                             <a href="event_details.php?id=<?php echo $row['id']; ?>" class="btn-review" style="background: #f39c12;">
                                 <i class="fas fa-edit me-2"></i> Manage Hold

@@ -33,6 +33,7 @@ $banners = json_decode($event['banners'] ?? '[]');
 $is_pending = ($event['status'] == 'pending');
 $is_hold = ($event['status'] == 'hold');
 $is_past_event = events_row_is_fully_past($event);
+$can_edit_event_roster = has_priv('events');
 
 $volunteers = $conn->query("
     SELECT v.id as vol_link_id, v.role, v.status as vol_status, v.attended as vol_attended, v.attendance_marked_at as vol_attendance_at,
@@ -361,11 +362,16 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                                                     <?php endif; ?>
                                                 </td>
                                                 <td class="text-end">
-                                                    <a href="manage_user.php?id=<?php echo $vol['vol_link_id']; ?>&action=<?php echo $vol['vol_status'] == 'active' ? 'block' : 'unblock'; ?>&type=volunteer" 
-                                                       class="btn btn-sm <?php echo $vol['vol_status'] == 'active' ? 'btn-outline-danger' : 'btn-outline-success'; ?>"
-                                                       style="font-size: 0.65rem;">
-                                                        <i class="fas fa-<?php echo $vol['vol_status'] == 'active' ? 'ban' : 'check'; ?>"></i>
-                                                    </a>
+                                                    <div class="d-inline-flex gap-1 justify-content-end align-items-center flex-wrap">
+                                                        <?php if ($can_edit_event_roster): ?>
+                                                        <button type="button" class="btn btn-sm btn-outline-secondary" style="font-size: 0.65rem;" title="Change role" onclick="editVolunteerRole(<?php echo (int) $vol['vol_link_id']; ?>, <?php echo htmlspecialchars(json_encode((string) $vol['role']), ENT_QUOTES, 'UTF-8'); ?>, <?php echo htmlspecialchars(json_encode((string) $vol['full_name']), ENT_QUOTES, 'UTF-8'); ?>)"><i class="fas fa-user-tag"></i></button>
+                                                        <?php endif; ?>
+                                                        <a href="manage_user.php?id=<?php echo $vol['vol_link_id']; ?>&action=<?php echo $vol['vol_status'] == 'active' ? 'block' : 'unblock'; ?>&type=volunteer" 
+                                                           class="btn btn-sm <?php echo $vol['vol_status'] == 'active' ? 'btn-outline-danger' : 'btn-outline-success'; ?>"
+                                                           style="font-size: 0.65rem;">
+                                                            <i class="fas fa-<?php echo $vol['vol_status'] == 'active' ? 'ban' : 'check'; ?>"></i>
+                                                        </a>
+                                                    </div>
                                                 </td>
                                             </tr>
                                             <?php endwhile; ?>
@@ -451,11 +457,16 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                                                     <?php endif; ?>
                                                 </td>
                                                 <td class="text-end">
-                                                    <a href="manage_user.php?id=<?php echo $part['participant_link_id']; ?>&action=<?php echo $part['participant_status'] == 'active' ? 'block' : 'unblock'; ?>&type=participant" 
-                                                       class="btn btn-sm <?php echo $part['participant_status'] == 'active' ? 'btn-outline-danger' : 'btn-outline-success'; ?>"
-                                                       style="font-size: 0.65rem;">
-                                                        <i class="fas fa-<?php echo $part['participant_status'] == 'active' ? 'ban' : 'check'; ?>"></i>
-                                                    </a>
+                                                    <div class="d-inline-flex gap-1 justify-content-end align-items-center flex-wrap">
+                                                        <?php if ($can_edit_event_roster): ?>
+                                                        <button type="button" class="btn btn-sm btn-outline-secondary" style="font-size: 0.65rem;" title="Update dept / class" onclick="editParticipantDept(<?php echo (int) $part['participant_link_id']; ?>, <?php echo htmlspecialchars(json_encode((string) ($part['department_class'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>, <?php echo htmlspecialchars(json_encode((string) $part['full_name']), ENT_QUOTES, 'UTF-8'); ?>)"><i class="fas fa-user-tag"></i></button>
+                                                        <?php endif; ?>
+                                                        <a href="manage_user.php?id=<?php echo $part['participant_link_id']; ?>&action=<?php echo $part['participant_status'] == 'active' ? 'block' : 'unblock'; ?>&type=participant" 
+                                                           class="btn btn-sm <?php echo $part['participant_status'] == 'active' ? 'btn-outline-danger' : 'btn-outline-success'; ?>"
+                                                           style="font-size: 0.65rem;">
+                                                            <i class="fas fa-<?php echo $part['participant_status'] == 'active' ? 'ban' : 'check'; ?>"></i>
+                                                        </a>
+                                                    </div>
                                                 </td>
                                             </tr>
                                             <?php endwhile; ?>
@@ -964,6 +975,75 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                     Swal.fire('Error', data.message || 'Upload failed', 'error');
                 }
             }).catch(err => Swal.fire('Error', err.message || 'Upload failed', 'error'));
+        }
+
+        function editVolunteerRole(volunteerId, currentRole, fullName) {
+            const eid = getPageEventId();
+            if (eid <= 0) {
+                Swal.fire('Error', 'Invalid event.', 'error');
+                return;
+            }
+            Swal.fire({
+                title: 'Update volunteer role',
+                text: fullName ? String(fullName) : '',
+                input: 'text',
+                inputLabel: 'Assigned role',
+                inputValue: currentRole ? String(currentRole) : '',
+                showCancelButton: true,
+                confirmButtonText: 'Save',
+                confirmButtonColor: '#6c5ce7',
+                cancelButtonColor: '#95a5a6',
+                preConfirm: function (v) {
+                    const t = v !== undefined && v !== null ? String(v).trim() : '';
+                    if (!t) {
+                        Swal.showValidationMessage('Role is required');
+                        return false;
+                    }
+                    return t;
+                }
+            }).then(function (res) {
+                if (!res.isConfirmed) return;
+                const fd = new FormData();
+                fd.append('event_id', String(eid));
+                fd.append('kind', 'volunteer_role');
+                fd.append('volunteer_id', String(volunteerId));
+                fd.append('role', res.value);
+                adminFetchJson('event_staff_update' + ADMIN_FETCH_EXT, { method: 'POST', body: fd }).then(function (data) {
+                    Swal.fire('Saved', data.message || 'Volunteer role updated.', 'success').then(function () { location.reload(); });
+                }).catch(function (err) { Swal.fire('Error', err.message || 'Failed', 'error'); });
+            });
+        }
+
+        function editParticipantDept(participantId, currentDept, fullName) {
+            const eid = getPageEventId();
+            if (eid <= 0) {
+                Swal.fire('Error', 'Invalid event.', 'error');
+                return;
+            }
+            Swal.fire({
+                title: 'Update participant',
+                text: (fullName ? String(fullName) + ' — ' : '') + 'Department / class (roster)',
+                input: 'text',
+                inputLabel: 'Dept / class',
+                inputValue: currentDept !== undefined && currentDept !== null ? String(currentDept) : '',
+                showCancelButton: true,
+                confirmButtonText: 'Save',
+                confirmButtonColor: '#6c5ce7',
+                cancelButtonColor: '#95a5a6',
+                preConfirm: function (v) {
+                    return v !== undefined && v !== null ? String(v).trim() : '';
+                }
+            }).then(function (res) {
+                if (!res.isConfirmed) return;
+                const fd = new FormData();
+                fd.append('event_id', String(eid));
+                fd.append('kind', 'participant_dept');
+                fd.append('participant_id', String(participantId));
+                fd.append('department_class', res.value !== undefined && res.value !== null ? String(res.value) : '');
+                adminFetchJson('event_staff_update' + ADMIN_FETCH_EXT, { method: 'POST', body: fd }).then(function (data) {
+                    Swal.fire('Saved', data.message || 'Participant updated.', 'success').then(function () { location.reload(); });
+                }).catch(function (err) { Swal.fire('Error', err.message || 'Failed', 'error'); });
+            });
         }
 
         function setWinner(userId, fullName, isWinner, btn) {

@@ -145,7 +145,7 @@ if ($table_ok) {
         :root { --brand-color: #FF5F15; --brand-soft: rgba(255, 95, 21, 0.08); --bg-body: #f8f9fd; }
         body { font-family: 'Plus Jakarta Sans', sans-serif; background: var(--bg-body); color: #2d3436; }
         .main-content { margin-left: 280px; padding: 40px; transition: 0.3s; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 20px; } }
+        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; box-sizing: border-box; width: 100%; max-width: 100%; } }
         .card-panel { border: none; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.04); }
         .btn-brand { background: var(--brand-color); color: #fff; border: none; border-radius: 12px; font-weight: 600; }
         .btn-brand:hover { background: #e04e0b; color: #fff; }
