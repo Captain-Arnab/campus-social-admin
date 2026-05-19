@@ -16,6 +16,18 @@ try {
     $input = file_get_contents("php://input");
     $data = json_decode($input, true);
     
+    if (!is_array($data)) {
+        http_response_code(400);
+        echo json_encode(["status" => "error", "message" => "Invalid JSON body"]);
+        exit();
+    }
+
+    if (($data['action'] ?? '') === 'switch_staff_role') {
+        require_once __DIR__ . '/event_staff_switch_lib.php';
+        event_staff_switch_role($conn, $data);
+        exit();
+    }
+
     if (!isset($data['event_id'], $data['user_id'], $data['department_class'])) {
         http_response_code(400);
         echo json_encode(["status" => "error", "message" => "event_id, user_id, and department_class are required"]);
@@ -104,8 +116,8 @@ try {
         exit();
     }
     
-    // Check if user is already a participant for this event
-    $check_query = "SELECT id FROM participant WHERE user_id = ? AND event_id = ?";
+    // Check if user is already an active participant for this event
+    $check_query = "SELECT id FROM participant WHERE user_id = ? AND event_id = ? AND status = 'active'";
     $stmt = $conn->prepare($check_query);
     
     if (!$stmt) {
@@ -124,8 +136,23 @@ try {
         $stmt->close();
         exit();
     }
-    
     $stmt->close();
+
+    $vol_check = $conn->prepare(
+        "SELECT id FROM volunteers WHERE user_id = ? AND event_id = ? AND status = 'active' LIMIT 1"
+    );
+    $vol_check->bind_param('ii', $user_id, $event_id);
+    $vol_check->execute();
+    if ($vol_check->get_result()->num_rows > 0) {
+        http_response_code(400);
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'You are registered as a volunteer. Use switch_staff_role to change to participant.',
+        ]);
+        $vol_check->close();
+        exit();
+    }
+    $vol_check->close();
 
     // Sync department/class on profile (student_faculty)
     $dept_esc = $conn->real_escape_string($department_class);

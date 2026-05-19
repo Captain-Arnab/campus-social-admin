@@ -40,6 +40,9 @@ $hold_requests = $conn->query("
     WHERE e.status='hold' 
     ORDER BY e.created_at DESC
 ");
+
+$app_users_count_row = $conn->query('SELECT COUNT(*) AS c FROM users');
+$app_users_count = $app_users_count_row ? (int) $app_users_count_row->fetch_assoc()['c'] : 0;
 ?>
 
 <!DOCTYPE html>
@@ -69,6 +72,19 @@ $hold_requests = $conn->query("
             .stat-card { padding: 30px; min-height: 0; }
         }
         .stat-card:hover { transform: translateY(-5px); }
+        a.stat-card-link {
+            display: block;
+            height: 100%;
+            text-decoration: none;
+            color: inherit;
+        }
+        a.stat-card-link:hover,
+        a.stat-card-link:focus { color: inherit; }
+        a.stat-card-link:focus-visible .stat-card {
+            outline: 3px solid rgba(255, 255, 255, 0.85);
+            outline-offset: 3px;
+        }
+        .stat-card-link .stat-card { height: 100%; cursor: pointer; }
         .stat-card .icon-overlay { position: absolute; right: -15px; bottom: -15px; font-size: 4.5rem; opacity: 0.15; transform: rotate(-10deg); }
         @media (min-width: 576px) {
             .stat-card .icon-overlay { font-size: 5.5rem; }
@@ -119,32 +135,72 @@ $hold_requests = $conn->query("
         <!-- xl: four across; lg–xl narrow main column: 2×2 so cards are not clipped (e.g. 1024px viewport with sidebar) -->
         <div class="row g-3 g-xl-4 mb-5">
             <div class="col-12 col-sm-6 col-xl-3 min-w-0">
+                <?php if (has_priv('events')): ?>
+                <a href="events.php?view=pending" class="stat-card-link" title="View pending approval events">
+                    <div class="stat-card bg-orange-grad">
+                        <small class="text-uppercase fw-bold opacity-75">Needs Review</small>
+                        <div class="stat-value mt-2 mb-0"><?php echo $pending_events; ?></div>
+                        <i class="fas fa-hourglass-half icon-overlay"></i>
+                    </div>
+                </a>
+                <?php else: ?>
                 <div class="stat-card bg-orange-grad">
                     <small class="text-uppercase fw-bold opacity-75">Needs Review</small>
                     <div class="stat-value mt-2 mb-0"><?php echo $pending_events; ?></div>
                     <i class="fas fa-hourglass-half icon-overlay"></i>
                 </div>
+                <?php endif; ?>
             </div>
             <div class="col-12 col-sm-6 col-xl-3 min-w-0">
+                <?php if (has_priv('events')): ?>
+                <a href="events.php?view=hold" class="stat-card-link" title="View events on hold">
+                    <div class="stat-card bg-hold-grad">
+                        <small class="text-uppercase fw-bold opacity-75">On Hold</small>
+                        <div class="stat-value mt-2 mb-0"><?php echo $hold_events; ?></div>
+                        <i class="fas fa-pause-circle icon-overlay"></i>
+                    </div>
+                </a>
+                <?php else: ?>
                 <div class="stat-card bg-hold-grad">
                     <small class="text-uppercase fw-bold opacity-75">On Hold</small>
                     <div class="stat-value mt-2 mb-0"><?php echo $hold_events; ?></div>
                     <i class="fas fa-pause-circle icon-overlay"></i>
                 </div>
+                <?php endif; ?>
             </div>
             <div class="col-12 col-sm-6 col-xl-3 min-w-0">
+                <?php if (has_priv('events')): ?>
+                <a href="events.php?view=live" class="stat-card-link" title="View live / upcoming events">
+                    <div class="stat-card bg-dark-grad">
+                        <small class="text-uppercase fw-bold opacity-50">Active Events</small>
+                        <div class="stat-value mt-2 mb-0"><?php echo $live_events; ?></div>
+                        <i class="fas fa-broadcast-tower icon-overlay"></i>
+                    </div>
+                </a>
+                <?php else: ?>
                 <div class="stat-card bg-dark-grad">
                     <small class="text-uppercase fw-bold opacity-50">Active Events</small>
                     <div class="stat-value mt-2 mb-0"><?php echo $live_events; ?></div>
                     <i class="fas fa-broadcast-tower icon-overlay"></i>
                 </div>
+                <?php endif; ?>
             </div>
             <div class="col-12 col-sm-6 col-xl-3 min-w-0">
+                <?php if (has_priv('manage_users')): ?>
+                <a href="users.php" class="stat-card-link" title="Manage app users">
+                    <div class="stat-card bg-info-grad">
+                        <small class="text-uppercase fw-bold opacity-50">App Users</small>
+                        <div class="stat-value mt-2 mb-0"><?php echo $app_users_count; ?></div>
+                        <i class="fas fa-user-friends icon-overlay"></i>
+                    </div>
+                </a>
+                <?php else: ?>
                 <div class="stat-card bg-info-grad">
                     <small class="text-uppercase fw-bold opacity-50">App Users</small>
-                    <div class="stat-value mt-2 mb-0"><?php echo $conn->query("SELECT * FROM users")->num_rows; ?></div>
+                    <div class="stat-value mt-2 mb-0"><?php echo $app_users_count; ?></div>
                     <i class="fas fa-user-friends icon-overlay"></i>
                 </div>
+                <?php endif; ?>
             </div>
         </div>
 
