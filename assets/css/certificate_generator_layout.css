@@ -1,0 +1,238 @@
+/* Certificate generator admin UI */
+.cert-gen-page-header {
+    margin-bottom: 1rem;
+}
+
+.cert-gen-shell {
+    display: grid;
+    grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+    gap: 1.25rem;
+    align-items: start;
+}
+
+@media (max-width: 1199.98px) {
+    .cert-gen-shell {
+        grid-template-columns: 1fr;
+    }
+    .cert-gen-preview-col {
+        position: relative !important;
+        top: 0 !important;
+        max-height: none !important;
+    }
+}
+
+.cert-gen-editor.card {
+    max-height: calc(100vh - 128px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.cert-gen-editor-scroll {
+    overflow-y: auto;
+    flex: 1 1 auto;
+    padding: 0.85rem 1rem;
+    scrollbar-width: thin;
+}
+
+.cert-gen-editor-actions {
+    flex-shrink: 0;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid #e9ecef;
+    background: #f8f9fb;
+}
+
+.cert-gen-accordion .accordion-item {
+    border: none;
+    border-bottom: 1px solid #eef0f3;
+}
+
+.cert-gen-accordion .accordion-button {
+    padding: 0.65rem 0.25rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    background: transparent;
+    box-shadow: none;
+    color: #2d3436;
+}
+
+.cert-gen-accordion .accordion-button:not(.collapsed) {
+    color: #FF5F15;
+    background: rgba(255, 95, 21, 0.06);
+}
+
+.cert-gen-accordion .accordion-button::after {
+    transform: scale(0.85);
+}
+
+.cert-gen-accordion .accordion-body {
+    padding: 0.5rem 0.25rem 0.85rem;
+}
+
+.cert-gen-field {
+    margin-bottom: 0.55rem;
+}
+
+.cert-gen-check .form-check-label {
+    font-size: 0.72rem;
+    color: #636e72;
+}
+
+.cert-role-toggle .btn {
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.cert-gen-field .select2-container {
+    font-size: 0.8rem;
+}
+
+.cert-gen-field .select2-container--bootstrap-5 .select2-selection {
+    min-height: 31px;
+    border-color: #dee2e6;
+}
+
+.cert-gen-editor .select2-dropdown {
+    z-index: 1060;
+}
+
+.cert-gen-field label {
+    margin-bottom: 0.2rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #636e72;
+}
+
+.cert-gen-field .form-text {
+    font-size: 0.68rem;
+    margin-top: 0.15rem;
+}
+
+.cert-gen-inline-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+}
+
+.cert-gen-media-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.cert-gen-thumb {
+    width: 48px;
+    height: 48px;
+    object-fit: contain;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    flex-shrink: 0;
+}
+
+.cert-gen-btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.35rem;
+}
+
+.cert-name-style-preview {
+    font-family: 'Pinyon Script', 'Cormorant Garamond', Georgia, serif;
+    font-size: 1.75rem;
+    line-height: 1.2;
+    color: #c9a227;
+    margin: 0.35rem 0 0;
+    min-height: 2rem;
+    text-align: center;
+    background: linear-gradient(180deg, #fffdf8 0%, #fff 100%);
+    border: 1px dashed #e8d4a8;
+    border-radius: 8px;
+    padding: 0.35rem 0.5rem;
+}
+
+/* Preview column — no dead gap below certificate */
+.cert-gen-preview-col {
+    position: sticky;
+    top: 0.75rem;
+    max-height: calc(100vh - 100px);
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.cert-gen-preview-card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border: none;
+    border-radius: 16px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.06);
+    overflow: hidden;
+    background: #fff;
+}
+
+.cert-gen-preview-toolbar {
+    flex-shrink: 0;
+    padding: 0.5rem 1rem;
+    background: #f8f9fb;
+    border-bottom: 1px solid #eef0f3;
+    font-size: 0.75rem;
+    color: #636e72;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.cert-gen-preview-viewport {
+    flex: 1 1 auto;
+    min-height: 380px;
+    max-height: calc(100vh - 180px);
+    overflow: auto;
+    background: #e8ecf1;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.cert-gen-preview-scaler {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.cert-gen-preview-viewport #certCanvas {
+    margin: 0;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+    transform-origin: top left;
+}
+
+.cert-page-wrap.cert-print-area {
+    background: transparent;
+    padding: 0;
+    overflow: visible;
+}
+
+@media print {
+    .cert-gen-editor,
+    .cert-gen-preview-toolbar {
+        display: none !important;
+    }
+    .cert-gen-preview-viewport {
+        max-height: none;
+        overflow: visible;
+        padding: 0;
+        background: #fff;
+    }
+    .cert-gen-preview-scaler {
+        width: auto !important;
+        height: auto !important;
+    }
+    #certCanvas {
+        transform: none !important;
+        box-shadow: none;
+    }
+}

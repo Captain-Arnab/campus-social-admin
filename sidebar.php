@@ -359,6 +359,15 @@ if ($user_type == 'admin') {
             </li>
             <?php endif; ?>
 
+            <?php if (has_priv('certificates')): ?>
+            <div class="menu-header">Certificates</div>
+            <li class="nav-item">
+                <a href="certificate_generator.php" class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'certificate_generator.php' ? 'active' : ''; ?>">
+                    <i class="fas fa-award"></i> Certificate generator
+                </a>
+            </li>
+            <?php endif; ?>
+
             <?php if (has_priv('ad_posts')): ?>
             <div class="menu-header">Content</div>
             <li class="nav-item">

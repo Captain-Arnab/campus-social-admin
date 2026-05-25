@@ -347,14 +347,25 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                                                 </td>
                                                 <td>
                                                     <?php if ($is_past_event && has_priv('certificates')): ?>
+                                                        <?php
+                                                        $cert_gen_vol = 'certificate_generator.php?' . http_build_query([
+                                                            'event_id' => $id,
+                                                            'user_id' => (int) $vol['user_id'],
+                                                            'type' => 'volunteer',
+                                                            'name' => $vol['full_name'],
+                                                            'title' => $event['title'],
+                                                            'organised_by' => trim(($event['category'] ?? '') . ($vol['role'] ? ' — ' . $vol['role'] : '')),
+                                                        ]);
+                                                        ?>
                                                         <?php if ($has_cert): ?>
                                                             <a href="<?php echo htmlspecialchars($certificates[$cert_key]); ?>" target="_blank" class="btn btn-sm btn-outline-success"><i class="fas fa-certificate me-1"></i>View</a>
                                                         <?php endif; ?>
-                                                        <label class="btn btn-sm btn-outline-primary mb-0 <?php echo $has_cert ? 'ms-1' : ''; ?>">
+                                                        <a href="<?php echo htmlspecialchars($cert_gen_vol); ?>" class="btn btn-sm btn-outline-warning <?php echo $has_cert ? 'ms-1' : ''; ?>" title="Generate certificate"><i class="fas fa-magic me-1"></i>Generate</a>
+                                                        <label class="btn btn-sm btn-outline-primary mb-0 ms-1">
                                                             <i class="fas fa-upload me-1"></i><?php echo $has_cert ? 'Replace' : 'Upload'; ?>
                                                             <input type="file" accept=".pdf,image/jpeg,image/png,image/gif,image/webp" hidden onchange="uploadCertificate(<?php echo (int)$vol['user_id']; ?>, 'volunteer', this)">
                                                         </label>
-                                                        <small class="d-block text-muted" style="font-size: 0.65rem;">PDF/Image, max 5MB</small>
+                                                        <small class="d-block text-muted" style="font-size: 0.65rem;">Generate, upload PDF/image (max 5MB)</small>
                                                     <?php elseif ($is_past_event): ?>
                                                         <span class="text-muted small">No certificate access</span>
                                                     <?php else: ?>
@@ -426,14 +437,33 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                                                 </td>
                                                 <td>
                                                     <?php if ($is_past_event && has_priv('certificates')): ?>
+                                                        <?php
+                                                        $part_winner_pos = 0;
+                                                        foreach ($event_winners as $ew) {
+                                                            if ((int) $ew['user_id'] === (int) $part['user_id']) {
+                                                                $part_winner_pos = (int) $ew['position'];
+                                                                break;
+                                                            }
+                                                        }
+                                                        $cert_gen_part = 'certificate_generator.php?' . http_build_query([
+                                                            'event_id' => $id,
+                                                            'user_id' => (int) $part['user_id'],
+                                                            'type' => 'participant',
+                                                            'name' => $part['full_name'],
+                                                            'title' => $event['title'],
+                                                            'organised_by' => trim($part['department_class'] ?? $event['category'] ?? ''),
+                                                            'position' => $part_winner_pos,
+                                                        ]);
+                                                        ?>
                                                         <?php if ($has_cert): ?>
                                                             <a href="<?php echo htmlspecialchars($certificates[$cert_key]); ?>" target="_blank" class="btn btn-sm btn-outline-success"><i class="fas fa-certificate me-1"></i>View</a>
                                                         <?php endif; ?>
-                                                        <label class="btn btn-sm btn-outline-primary mb-0 <?php echo $has_cert ? 'ms-1' : ''; ?>">
+                                                        <a href="<?php echo htmlspecialchars($cert_gen_part); ?>" class="btn btn-sm btn-outline-warning <?php echo $has_cert ? 'ms-1' : ''; ?>" title="Generate certificate"><i class="fas fa-magic me-1"></i>Generate</a>
+                                                        <label class="btn btn-sm btn-outline-primary mb-0 ms-1">
                                                             <i class="fas fa-upload me-1"></i><?php echo $has_cert ? 'Replace' : 'Upload'; ?>
                                                             <input type="file" accept=".pdf,image/jpeg,image/png,image/gif,image/webp" hidden onchange="uploadCertificate(<?php echo (int)$part['user_id']; ?>, 'participant', this)">
                                                         </label>
-                                                        <small class="d-block text-muted" style="font-size: 0.65rem;">PDF/Image, max 5MB</small>
+                                                        <small class="d-block text-muted" style="font-size: 0.65rem;">Generate, upload PDF/image (max 5MB)</small>
                                                     <?php elseif ($is_past_event): ?>
                                                         <span class="text-muted small">No certificate access</span>
                                                     <?php else: ?>
