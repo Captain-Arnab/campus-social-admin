@@ -137,8 +137,21 @@ if ($seal_glob && is_file($seal_glob[0])) {
     $seal_path = 'uploads/certificates/' . basename($seal_glob[0]);
 }
 $defaults['seal_url'] = $seal_path;
-$defaults['seal_show'] = true;
+$defaults['seal_show'] = false;
 $defaults['signatory_location'] = 'Hyderabad, Telangana, India';
+
+$cert_template_path = 'assets/images/certificate_template.jpeg';
+$cert_template_abs = __DIR__ . '/' . $cert_template_path;
+$cert_canvas_w = 1056;
+$cert_canvas_h = 744;
+if (is_file($cert_template_abs)) {
+    $cert_sz = @getimagesize($cert_template_abs);
+    if ($cert_sz && !empty($cert_sz[0]) && !empty($cert_sz[1])) {
+        $cert_canvas_w = (int) $cert_sz[0];
+        $cert_canvas_h = (int) $cert_sz[1];
+    }
+}
+$cert_font_base = max(12, (int) round($cert_canvas_w / 66));
 
 function format_cert_display_name(string $raw): string
 {
@@ -373,7 +386,8 @@ function cert_achievement_phrase(string $key): string
                                     <input type="text" class="form-control form-control-sm cert-field" id="f_signatory_location" value="<?php echo htmlspecialchars($defaults['signatory_location']); ?>" placeholder="Hyderabad, Telangana, India">
                                     <div class="form-text">Kept on white area — avoids overlap with corner graphic.</div>
                                 </div>
-                                <p class="small fw-bold text-muted mb-2 mt-2">Date seal (star)</p>
+                                <p class="small fw-bold text-muted mb-2 mt-2">Optional seal overlay</p>
+                                <div class="form-text mb-2">Template already includes the gold seal. Enable only to replace it.</div>
                                 <div class="cert-gen-media-row">
                                     <div id="sealFormPreviewWrap" class="cert-gen-thumb d-flex align-items-center justify-content-center bg-white p-1">
                                         <img id="sealFormPreview" src="<?php echo htmlspecialchars($seal_path); ?>" alt="" style="width:44px;height:44px;object-fit:contain;">
@@ -427,71 +441,72 @@ function cert_achievement_phrase(string $key): string
                 </div>
                 <div class="cert-gen-preview-viewport" id="previewViewport">
                     <div class="cert-gen-preview-scaler" id="previewScaler">
-                    <div id="certCanvas">
-                        <div class="cert-frame-gold"></div>
-                        <div class="cert-corner-tl"></div>
-                        <div class="cert-corner-br"></div>
-                        <span class="cert-flourish cert-flourish-tr">❧</span>
-                        <span class="cert-flourish cert-flourish-bl">❧</span>
+                    <div id="certCanvas" class="cert-canvas" style="width:<?php echo (int) $cert_canvas_w; ?>px;height:<?php echo (int) $cert_canvas_h; ?>px;font-size:<?php echo (int) $cert_font_base; ?>px;">
+                        <img class="cert-bg-img" src="<?php echo htmlspecialchars($cert_template_path); ?>" alt="" crossorigin="anonymous">
+                        <div class="cert-overlay">
+                            <div class="cert-logo-block" id="cert_logo_block" style="<?php echo $defaults['logo_show'] && $logo_exists ? '' : 'display:none;'; ?>">
+                                <img id="cert_logo_img" src="<?php echo $logo_exists ? htmlspecialchars($logo_path) : ''; ?>" alt="Logo">
+                                <div class="cert-logo-tag" id="v_logo_tagline"><?php
+                                    $tag_lines = preg_split('/\r\n|\r|\n/', $defaults['logo_tagline']);
+                                    echo htmlspecialchars($tag_lines[0] ?? '');
+                                    if (!empty($tag_lines[1])) {
+                                        echo '<br>' . htmlspecialchars($tag_lines[1]);
+                                    }
+                                ?></div>
+                            </div>
 
-                        <div class="cert-logo-block" id="cert_logo_block" style="<?php echo $defaults['logo_show'] && $logo_exists ? '' : 'display:none;'; ?>">
-                            <img id="cert_logo_img" src="<?php echo $logo_exists ? htmlspecialchars($logo_path) : ''; ?>" alt="University logo">
-                            <div class="cert-logo-tag" id="v_logo_tagline"><?php
-                                $tag_lines = preg_split('/\r\n|\r|\n/', $defaults['logo_tagline']);
-                                echo htmlspecialchars($tag_lines[0] ?? '');
-                                if (!empty($tag_lines[1])) {
-                                    echo '<br>' . htmlspecialchars($tag_lines[1]);
-                                }
-                            ?></div>
-                        </div>
+                            <header class="cert-header">
+                                <h1 class="cert-uni-name" id="v_university_name"><?php echo htmlspecialchars($defaults['university_name']); ?></h1>
+                                <p class="cert-uni-loc" id="v_university_location"><?php echo htmlspecialchars($defaults['university_location']); ?></p>
+                                <p class="cert-uni-est" id="v_university_establishment"><?php echo htmlspecialchars($defaults['university_establishment']); ?></p>
+                                <p class="cert-motto-line" id="v_university_motto"><?php echo htmlspecialchars($defaults['university_motto']); ?></p>
+                            </header>
 
-                        <header class="cert-header">
-                            <h1 class="cert-uni-name" id="v_university_name"><?php echo htmlspecialchars($defaults['university_name']); ?></h1>
-                            <p class="cert-uni-loc" id="v_university_location"><?php echo htmlspecialchars($defaults['university_location']); ?></p>
-                            <p class="cert-uni-est" id="v_university_establishment"><?php echo htmlspecialchars($defaults['university_establishment']); ?></p>
-                            <p class="cert-motto-line" id="v_university_motto"><?php echo htmlspecialchars($defaults['university_motto']); ?></p>
-                        </header>
+                            <div class="cert-title-block">
+                                <h2 class="cert-title-main">CERTIFICATE</h2>
+                                <p class="cert-title-sub">OF APPRECIATION</p>
+                            </div>
 
-                        <div class="cert-title-block">
-                            <h2 class="cert-title-main">CERTIFICATE</h2>
-                            <p class="cert-title-sub">OF APPRECIATION</p>
-                            <div class="cert-title-rule"></div>
-                        </div>
+                            <div class="cert-body">
+                                <p class="cert-body-intro">This is to certify that</p>
+                                <span class="cert-name" id="v_participant_name"><?php echo htmlspecialchars(format_cert_display_name($defaults['participant_name'])); ?></span>
+                                <p class="cert-achievement-line" id="v_achievement"><?php echo cert_achievement_phrase($defaults['achievement']); ?></p>
+                                <p class="cert-event-title" id="v_event_title">“<?php echo htmlspecialchars($defaults['event_title'] ?: 'Event Title Goes Here'); ?>”</p>
+                                <p class="cert-organised">Organised by: <strong id="v_organised_by"><?php echo htmlspecialchars($defaults['organised_by'] ?: 'Department / Club / Cell Name'); ?></strong></p>
+                                <p class="cert-appreciation">We appreciate your enthusiasm, dedication, and active participation. Your contribution reflects the spirit of innovation, learning, and leadership encouraged at Guru Nanak University.</p>
+                                <p class="cert-footer-motto">KEEP LEARNING • KEEP GROWING • KEEP LEADING</p>
+                            </div>
 
-                        <div class="cert-body">
-                            <p class="cert-body-intro">This is to certify that</p>
-                            <span class="cert-name" id="v_participant_name"><?php echo htmlspecialchars(format_cert_display_name($defaults['participant_name'])); ?></span>
-                            <p class="cert-achievement-line" id="v_achievement"><?php echo cert_achievement_phrase($defaults['achievement']); ?></p>
-                            <p class="cert-event-title" id="v_event_title">“<?php echo htmlspecialchars($defaults['event_title'] ?: 'Event Title Goes Here'); ?>”</p>
-                            <p class="cert-organised">Organised by: <strong id="v_organised_by"><?php echo htmlspecialchars($defaults['organised_by'] ?: 'Department / Club / Cell Name'); ?></strong></p>
-                            <p class="cert-appreciation">We appreciate your enthusiasm, dedication, and active participation. Your contribution reflects the spirit of innovation, learning, and leadership encouraged at Guru Nanak University.</p>
-                            <p class="cert-footer-motto">KEEP LEARNING • KEEP GROWING • KEEP LEADING</p>
-                        </div>
-
-                        <footer class="cert-footer">
                             <div class="cert-qr-block" id="cert_qr_block">
                                 <div class="cert-qr-box" id="cert_qr_box">
                                     <span class="cert-qr-placeholder" id="cert_qr_placeholder" style="<?php echo $qr_path ? 'display:none;' : ''; ?>">QR</span>
-                                    <img id="cert_qr_img" class="cert-qr-img" src="<?php echo $qr_path ? htmlspecialchars($qr_path) : ''; ?>" alt="Verification QR code" style="<?php echo $qr_path ? '' : 'display:none;'; ?>">
+                                    <img id="cert_qr_img" class="cert-qr-img" src="<?php echo $qr_path ? htmlspecialchars($qr_path) : ''; ?>" alt="QR" style="<?php echo $qr_path ? '' : 'display:none;'; ?>">
                                 </div>
-                                <div id="v_qr_scan_label"><?php echo htmlspecialchars($defaults['qr_scan_label']); ?></div>
-                                <div class="cert-id-line">Certificate ID: <span id="v_certificate_id"><?php echo htmlspecialchars($defaults['certificate_id']); ?></span></div>
+                                <div class="cert-qr-meta">
+                                    <div id="v_qr_scan_label"><?php echo htmlspecialchars($defaults['qr_scan_label']); ?></div>
+                                    <div class="cert-id-line">Certificate ID: <span id="v_certificate_id"><?php echo htmlspecialchars($defaults['certificate_id']); ?></span></div>
+                                </div>
                             </div>
+
                             <div class="cert-date-block" id="cert_seal_block">
-                                <div class="cert-seal-wrap">
-                                    <img id="cert_seal_img" class="cert-seal-img" src="<?php echo htmlspecialchars($seal_path); ?>" alt="Official seal">
+                                <div class="cert-seal-wrap" id="cert_seal_wrap" style="<?php echo $defaults['seal_show'] ? '' : 'display:none;'; ?>">
+                                    <img id="cert_seal_img" class="cert-seal-img" src="<?php echo htmlspecialchars($seal_path); ?>" alt="">
                                 </div>
-                                <div><i class="far fa-calendar-alt me-1"></i> Date</div>
-                                <div class="cert-date-val" id="v_certificate_date"><?php echo htmlspecialchars($defaults['certificate_date']); ?></div>
+                                <div class="cert-date-row">
+                                    <i class="far fa-calendar-alt cert-date-icon" aria-hidden="true"></i>
+                                    <div class="cert-date-val" id="v_certificate_date"><?php echo htmlspecialchars($defaults['certificate_date']); ?></div>
+                                </div>
                             </div>
+
                             <div class="cert-sign-block">
                                 <div class="cert-sign-line"></div>
                                 <p class="cert-sign-title" id="v_signatory_title"><?php echo htmlspecialchars($defaults['signatory_title']); ?></p>
                                 <p class="cert-sign-uni" id="v_signatory_footer">
-                                    <span id="v_signatory_uni"><?php echo htmlspecialchars($defaults['university_name']); ?></span><span class="cert-sign-loc"><span id="v_signatory_location"><?php echo htmlspecialchars($defaults['signatory_location']); ?></span></span>
+                                    <span id="v_signatory_uni"><?php echo htmlspecialchars($defaults['university_name']); ?></span>
+                                    <span class="cert-sign-loc"><span id="v_signatory_location"><?php echo htmlspecialchars($defaults['signatory_location']); ?></span></span>
                                 </p>
                             </div>
-                        </footer>
+                        </div>
                     </div>
                     </div>
                 </div>
@@ -516,8 +531,8 @@ function cert_achievement_phrase(string $key): string
     const DEFAULT_QR_URL = <?php echo json_encode($qr_path); ?>;
     const DEFAULT_SEAL_URL = <?php echo json_encode($seal_path); ?>;
     const FALLBACK_SEAL_URL = <?php echo json_encode($default_seal_path); ?>;
-    const CERT_W = 1056;
-    const CERT_H = 744;
+    const CERT_W = <?php echo (int) $cert_canvas_w; ?>;
+    const CERT_H = <?php echo (int) $cert_canvas_h; ?>;
 
     const ACHIEVEMENT_HTML = {
         participated: 'has successfully participated in the event',
@@ -1078,13 +1093,10 @@ function cert_achievement_phrase(string $key): string
 
     function applySealVisibility() {
         const show = document.getElementById('f_seal_show').checked;
-        const block = document.getElementById('cert_seal_block');
+        const sealPart = document.getElementById('cert_seal_wrap');
         const img = document.getElementById('cert_seal_img');
         const has = img && (img.getAttribute('src') || '').trim();
-        if (block) {
-            const sealPart = block.querySelector('.cert-seal-wrap');
-            if (sealPart) sealPart.style.display = (show && has) ? '' : 'none';
-        }
+        if (sealPart) sealPart.style.display = (show && has) ? '' : 'none';
     }
 
     function setSealSrc(url) {
@@ -1214,14 +1226,32 @@ function cert_achievement_phrase(string $key): string
         document.getElementById('btnSaveToUser').disabled = !(eid > 0 && uid > 0);
     }
 
+    function waitCertImages() {
+        const canvas = document.getElementById('certCanvas');
+        if (!canvas) return Promise.resolve();
+        const imgs = canvas.querySelectorAll('img');
+        const pending = [];
+        imgs.forEach(function (img) {
+            if (!img.getAttribute('src')) return;
+            if (img.complete && img.naturalWidth > 0) return;
+            pending.push(new Promise(function (resolve) {
+                img.onload = resolve;
+                img.onerror = resolve;
+            }));
+        });
+        return pending.length ? Promise.all(pending) : Promise.resolve();
+    }
+
     async function renderCanvas() {
         const canvas = document.getElementById('certCanvas');
         const prevTransform = canvas.style.transform;
         canvas.style.transform = 'none';
+        await waitCertImages();
         const out = await html2canvas(canvas, {
             scale: 2,
             useCORS: true,
-            backgroundColor: '#faf8f4',
+            allowTaint: false,
+            backgroundColor: null,
             logging: false,
             width: CERT_W,
             height: CERT_H
