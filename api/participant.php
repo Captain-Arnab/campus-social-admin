@@ -172,11 +172,19 @@ try {
     $insert_stmt->bind_param("iis", $event_id, $user_id, $department_class);
     
     if ($insert_stmt->execute()) {
+        $new_participant_id = $insert_stmt->insert_id;
+        // Participant and attendee are mutually exclusive, so the join counts stay in sync.
+        $att_del = $conn->prepare("DELETE FROM attendees WHERE event_id = ? AND user_id = ?");
+        if ($att_del) {
+            $att_del->bind_param("ii", $event_id, $user_id);
+            $att_del->execute();
+            $att_del->close();
+        }
         http_response_code(200);
         echo json_encode([
             "status" => "success", 
             "message" => "You have been registered as a participant",
-            "participant_id" => $insert_stmt->insert_id
+            "participant_id" => $new_participant_id
         ]);
     } else {
         http_response_code(500);

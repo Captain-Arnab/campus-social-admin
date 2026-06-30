@@ -1,11 +1,14 @@
 <?php
 /**
- * Switch between volunteer and participant for an event (app users).
+ * Set a user's role for an event (app users). Works from any starting state:
+ * attendee, volunteer or participant — so attendees can upgrade and volunteers
+ * can change their assigned role without a 400 error.
  *
  * POST JSON:
  *   event_id, user_id, to_role ("volunteer"|"participant")
- *   role — required when to_role is volunteer
- *   department_class — required when to_role is participant (falls back to profile if omitted)
+ *   role — required when to_role is volunteer (kept as-is on a pure re-confirm)
+ *   department_class — required when to_role is participant (falls back to the
+ *                      existing record / profile if omitted)
  *
  * Same action via volunteers.php or participant.php:
  *   { "action": "switch_staff_role", ... }

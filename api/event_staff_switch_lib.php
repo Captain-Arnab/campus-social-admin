@@ -1,7 +1,16 @@
 <?php
 /**
- * Shared logic: switch a user between volunteer and participant for one event.
+ * Shared logic: set a user's role (volunteer or participant) for one event.
  * Used by event_staff_switch.php, volunteers.php, and participant.php (action=switch_staff_role).
+ *
+ * Supports every starting state:
+ *   - attendee  -> participant / volunteer (the user "upgrades" their join)
+ *   - volunteer <-> participant            (swap staff role)
+ *   - volunteer -> volunteer               (change the assigned volunteer role)
+ *   - participant -> participant           (update the department/class)
+ *
+ * Roles are mutually exclusive: becoming a participant/volunteer removes the
+ * attendee row and the opposite staff role, so per-event counts never double up.
  */
 
 function event_staff_switch_role(mysqli $conn, array $data): void
@@ -95,6 +104,9 @@ function event_staff_switch_role(mysqli $conn, array $data): void
         return;
     }
 
+    // Current role for this event (active rows only). A user can hold at most one
+    // staff role at a time; attendee is a separate "joined" state that we treat as
+    // mutually exclusive with participant/volunteer so the counts stay in sync.
     $vol_stmt = $conn->prepare(
         "SELECT id, role FROM volunteers WHERE event_id = ? AND user_id = ? AND status = 'active' LIMIT 1"
     );
@@ -111,27 +123,33 @@ function event_staff_switch_role(mysqli $conn, array $data): void
     $active_part = $part_stmt->get_result()->fetch_assoc();
     $part_stmt->close();
 
-    if ($to_role === 'participant') {
-        if (!$active_vol) {
-            http_response_code(400);
-            echo json_encode([
-                'status' => 'error',
-                'message' => 'You are not an active volunteer for this event',
-            ]);
-            return;
-        }
-        if ($active_part) {
-            http_response_code(400);
-            echo json_encode([
-                'status' => 'error',
-                'message' => 'You are already a participant for this event',
-            ]);
-            return;
-        }
+    $att_stmt = $conn->prepare(
+        'SELECT id FROM attendees WHERE event_id = ? AND user_id = ? LIMIT 1'
+    );
+    $att_stmt->bind_param('ii', $event_id, $user_id);
+    $att_stmt->execute();
+    $is_attendee = $att_stmt->get_result()->num_rows > 0;
+    $att_stmt->close();
 
+    // Human-readable label for the role the user is coming from (for the response).
+    if ($active_vol) {
+        $from_role = 'volunteer';
+    } elseif ($active_part) {
+        $from_role = 'participant';
+    } elseif ($is_attendee) {
+        $from_role = 'attendee';
+    } else {
+        $from_role = 'none';
+    }
+
+    if ($to_role === 'participant') {
         $department_class = isset($data['department_class'])
             ? trim((string) $data['department_class'])
             : '';
+        if ($department_class === '' && $active_part) {
+            // Pure role refresh: keep the dept already on the participant record.
+            $department_class = trim((string) ($active_part['department_class'] ?? ''));
+        }
         if ($department_class === '') {
             $sf = $conn->prepare(
                 'SELECT department_class FROM student_faculty WHERE user_id = ? LIMIT 1'
@@ -153,13 +171,13 @@ function event_staff_switch_role(mysqli $conn, array $data): void
 
         $conn->begin_transaction();
         try {
-            $del = $conn->prepare('DELETE FROM volunteers WHERE id = ? AND event_id = ? AND user_id = ?');
-            $del->bind_param('iii', $active_vol['id'], $event_id, $user_id);
-            $del->execute();
-            if ($del->affected_rows < 1) {
-                throw new RuntimeException('Could not remove volunteer record');
+            // Drop any active volunteer role for this event (volunteer -> participant).
+            if ($active_vol) {
+                $del = $conn->prepare('DELETE FROM volunteers WHERE id = ? AND event_id = ? AND user_id = ?');
+                $del->bind_param('iii', $active_vol['id'], $event_id, $user_id);
+                $del->execute();
+                $del->close();
             }
-            $del->close();
 
             $dept_esc = $conn->real_escape_string($department_class);
             $conn->query(
@@ -193,12 +211,24 @@ function event_staff_switch_role(mysqli $conn, array $data): void
                 $ins->close();
             }
 
+            // Remove the attendee row so the same user is never counted twice.
+            $att_del = $conn->prepare('DELETE FROM attendees WHERE event_id = ? AND user_id = ?');
+            $att_del->bind_param('ii', $event_id, $user_id);
+            $att_del->execute();
+            $att_del->close();
+
             $conn->commit();
+
+            if ($from_role === 'participant') {
+                $message = 'Participant details updated';
+            } else {
+                $message = 'Switched from ' . $from_role . ' to participant';
+            }
             http_response_code(200);
             echo json_encode([
                 'status' => 'success',
-                'message' => 'Switched from volunteer to participant',
-                'from_role' => 'volunteer',
+                'message' => $message,
+                'from_role' => $from_role,
                 'to_role' => 'participant',
                 'participant_id' => $participant_id,
                 'department_class' => $department_class,
@@ -211,25 +241,12 @@ function event_staff_switch_role(mysqli $conn, array $data): void
         return;
     }
 
-    // Switch to volunteer
-    if (!$active_part) {
-        http_response_code(400);
-        echo json_encode([
-            'status' => 'error',
-            'message' => 'You are not an active participant for this event',
-        ]);
-        return;
-    }
-    if ($active_vol) {
-        http_response_code(400);
-        echo json_encode([
-            'status' => 'error',
-            'message' => 'You are already a volunteer for this event',
-        ]);
-        return;
-    }
-
+    // Switch to volunteer (also handles changing an existing volunteer's role).
     $volunteer_role = isset($data['role']) ? trim((string) $data['role']) : '';
+    if ($volunteer_role === '' && $active_vol) {
+        // Keep the existing role when none supplied (e.g. re-confirming the role).
+        $volunteer_role = trim((string) ($active_vol['role'] ?? ''));
+    }
     if ($volunteer_role === '') {
         http_response_code(400);
         echo json_encode([
@@ -246,13 +263,13 @@ function event_staff_switch_role(mysqli $conn, array $data): void
 
     $conn->begin_transaction();
     try {
-        $del = $conn->prepare('DELETE FROM participant WHERE id = ? AND event_id = ? AND user_id = ?');
-        $del->bind_param('iii', $active_part['id'], $event_id, $user_id);
-        $del->execute();
-        if ($del->affected_rows < 1) {
-            throw new RuntimeException('Could not remove participant record');
+        // Drop any active participant record for this event (participant -> volunteer).
+        if ($active_part) {
+            $del = $conn->prepare('DELETE FROM participant WHERE id = ? AND event_id = ? AND user_id = ?');
+            $del->bind_param('iii', $active_part['id'], $event_id, $user_id);
+            $del->execute();
+            $del->close();
         }
-        $del->close();
 
         $existing = $conn->prepare(
             'SELECT id FROM volunteers WHERE event_id = ? AND user_id = ? LIMIT 1'
@@ -280,12 +297,24 @@ function event_staff_switch_role(mysqli $conn, array $data): void
             $ins->close();
         }
 
+        // Remove the attendee row so the same user is never counted twice.
+        $att_del = $conn->prepare('DELETE FROM attendees WHERE event_id = ? AND user_id = ?');
+        $att_del->bind_param('ii', $event_id, $user_id);
+        $att_del->execute();
+        $att_del->close();
+
         $conn->commit();
+
+        if ($from_role === 'volunteer') {
+            $message = 'Volunteer role updated';
+        } else {
+            $message = 'Switched from ' . $from_role . ' to volunteer';
+        }
         http_response_code(200);
         echo json_encode([
             'status' => 'success',
-            'message' => 'Switched from participant to volunteer',
-            'from_role' => 'participant',
+            'message' => $message,
+            'from_role' => $from_role,
             'to_role' => 'volunteer',
             'volunteer_id' => $volunteer_id,
             'role' => $volunteer_role,

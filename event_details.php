@@ -52,6 +52,15 @@ $participants = $conn->query("
     WHERE p.event_id = $id
 ");
 
+// Active counts (blocked members still show in the tables below, but the badge
+// counts match the figures the mobile app shows so the numbers stay in sync).
+$active_volunteer_count = (int) ($conn->query(
+    "SELECT COUNT(*) AS c FROM volunteers WHERE event_id = $id AND status = 'active'"
+)->fetch_assoc()['c'] ?? 0);
+$active_participant_count = (int) ($conn->query(
+    "SELECT COUNT(*) AS c FROM participant WHERE event_id = $id AND status = 'active'"
+)->fetch_assoc()['c'] ?? 0);
+
 // Fetch status change log
 $status_log = $conn->query("SELECT * FROM event_status_log WHERE event_id = $id ORDER BY changed_at DESC LIMIT 5");
 
@@ -294,12 +303,12 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                     <ul class="nav nav-tabs px-3 pt-2" role="tablist">
                         <li class="nav-item" role="presentation">
                             <button class="nav-link active" id="volunteers-tab" data-bs-toggle="tab" data-bs-target="#volunteers" type="button" role="tab">
-                                <i class="fas fa-hands-helping me-1"></i> Volunteers <span class="badge bg-light text-dark ms-1"><?php echo $volunteers->num_rows; ?></span>
+                                <i class="fas fa-hands-helping me-1"></i> Volunteers <span class="badge bg-light text-dark ms-1"><?php echo $active_volunteer_count; ?></span>
                             </button>
                         </li>
                         <li class="nav-item" role="presentation">
                             <button class="nav-link" id="participants-tab" data-bs-toggle="tab" data-bs-target="#participants" type="button" role="tab">
-                                <i class="fas fa-user-check me-1"></i> Participants <span class="badge bg-light text-dark ms-1"><?php echo $participants->num_rows; ?></span>
+                                <i class="fas fa-user-check me-1"></i> Participants <span class="badge bg-light text-dark ms-1"><?php echo $active_participant_count; ?></span>
                             </button>
                         </li>
                     </ul>

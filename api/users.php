@@ -464,20 +464,115 @@ if ($method == 'POST') {
     elseif ($action == 'update_details') {
         authorize();
         $data = json_decode(file_get_contents("php://input"), true);
-        $id = intval($data['user_id']);
-        $interests = $conn->real_escape_string($data['interests']); 
-        $bio = $conn->real_escape_string($data['bio'] ?? '');
-
-        $sql = "UPDATE users SET interests='$interests', bio='$bio' WHERE id=$id";
-        if (!$conn->query($sql)) {
-            echo json_encode(["status" => "error", "message" => "Update failed: " . $conn->error]);
+        if (!is_array($data) || empty($data['user_id'])) {
+            echo json_encode(["status" => "error", "message" => "user_id is required"]);
             exit();
         }
+        $id = intval($data['user_id']);
+        if ($id <= 0) {
+            echo json_encode(["status" => "error", "message" => "Invalid user_id"]);
+            exit();
+        }
+
+        // Confirm the user exists (and learn their role for the right ID column).
+        $u_res = $conn->query("SELECT id, is_student FROM users WHERE id = $id");
+        if (!$u_res || $u_res->num_rows === 0) {
+            echo json_encode(["status" => "error", "message" => "User not found"]);
+            exit();
+        }
+        $u_row = $u_res->fetch_assoc();
+        $is_student_row = (int) $u_row['is_student'];
+
+        // Only update the fields the client actually sent (so a partial edit
+        // never wipes other profile values).
+        $user_updates = [];
+
+        if (array_key_exists('full_name', $data)) {
+            $full_name = trim((string) $data['full_name']);
+            if ($full_name === '') {
+                echo json_encode(["status" => "error", "message" => "Full name cannot be empty"]);
+                exit();
+            }
+            $user_updates[] = "full_name = '" . $conn->real_escape_string($full_name) . "'";
+        }
+
+        if (array_key_exists('phone', $data)) {
+            $phone = trim((string) $data['phone']);
+            if ($phone === '') {
+                echo json_encode(["status" => "error", "message" => "Phone cannot be empty"]);
+                exit();
+            }
+            $phone_esc = $conn->real_escape_string($phone);
+            $dup = $conn->query("SELECT id FROM users WHERE phone = '$phone_esc' AND id != $id LIMIT 1");
+            if ($dup && $dup->num_rows > 0) {
+                echo json_encode(["status" => "error", "message" => "Phone number already in use"]);
+                exit();
+            }
+            $user_updates[] = "phone = '$phone_esc'";
+        }
+
+        if (array_key_exists('email', $data)) {
+            $email = strtolower(trim((string) $data['email']));
+            if ($email === '') {
+                echo json_encode(["status" => "error", "message" => "Email cannot be empty"]);
+                exit();
+            }
+            $email_esc = $conn->real_escape_string($email);
+            $dup = $conn->query("SELECT id FROM users WHERE LOWER(TRIM(email)) = '$email_esc' AND id != $id LIMIT 1");
+            if ($dup && $dup->num_rows > 0) {
+                echo json_encode(["status" => "error", "message" => "Email already in use"]);
+                exit();
+            }
+            $user_updates[] = "email = '$email_esc'";
+        }
+
+        if (array_key_exists('bio', $data)) {
+            $user_updates[] = "bio = '" . $conn->real_escape_string((string) $data['bio']) . "'";
+        }
+
+        if (array_key_exists('interests', $data)) {
+            $user_updates[] = "interests = '" . $conn->real_escape_string((string) $data['interests']) . "'";
+        }
+
+        if (!empty($user_updates)) {
+            $sql = "UPDATE users SET " . implode(', ', $user_updates) . " WHERE id = $id";
+            if (!$conn->query($sql)) {
+                echo json_encode(["status" => "error", "message" => "Update failed: " . $conn->error]);
+                exit();
+            }
+        }
+
+        // student_faculty profile fields
         if (array_key_exists('department_class', $data)) {
             $dc = trim((string) $data['department_class']);
             $dc_sql = $dc === '' ? 'NULL' : "'" . $conn->real_escape_string($dc) . "'";
             $conn->query("UPDATE student_faculty SET department_class = $dc_sql WHERE user_id = $id");
         }
+        if ($is_student_row === 1 && array_key_exists('roll_number', $data)) {
+            $roll = trim((string) $data['roll_number']);
+            if ($roll !== '') {
+                $roll_esc = $conn->real_escape_string($roll);
+                $dup = $conn->query("SELECT user_id FROM student_faculty WHERE roll_number = '$roll_esc' AND user_id != $id LIMIT 1");
+                if ($dup && $dup->num_rows > 0) {
+                    echo json_encode(["status" => "error", "message" => "Roll number already in use"]);
+                    exit();
+                }
+                $conn->query("UPDATE student_faculty SET roll_number = '$roll_esc' WHERE user_id = $id");
+            }
+        }
+        if ($is_student_row === 0 && array_key_exists('emp_number', $data)) {
+            $emp = trim((string) $data['emp_number']);
+            if ($emp !== '') {
+                $emp_esc = $conn->real_escape_string($emp);
+                $dup = $conn->query("SELECT user_id FROM student_faculty WHERE emp_number = '$emp_esc' AND emp_number != 'NA' AND user_id != $id LIMIT 1");
+                if ($dup && $dup->num_rows > 0) {
+                    echo json_encode(["status" => "error", "message" => "Employee ID already in use"]);
+                    exit();
+                }
+                $conn->query("UPDATE student_faculty SET emp_number = '$emp_esc' WHERE user_id = $id");
+            }
+        }
+
         echo json_encode(["status" => "success", "message" => "Profile updated"]);
     }
 
@@ -525,8 +620,8 @@ if ($method == 'GET') {
         $created = (int)$conn->query("SELECT count(*) as c FROM events WHERE organizer_id=$user_id")->fetch_assoc()['c'];
         $attended = (int)$conn->query("SELECT count(*) as c FROM attendees WHERE user_id=$user_id")->fetch_assoc()['c'];
         $favorites = (int)$conn->query("SELECT count(*) as c FROM favorites WHERE user_id=$user_id")->fetch_assoc()['c'];
-        $volunteering = (int)$conn->query("SELECT count(*) as c FROM volunteers WHERE user_id=$user_id")->fetch_assoc()['c'];
-        $participating = (int)$conn->query("SELECT count(*) as c FROM participant WHERE user_id=$user_id")->fetch_assoc()['c'];
+        $volunteering = (int)$conn->query("SELECT count(*) as c FROM volunteers WHERE user_id=$user_id AND status='active'")->fetch_assoc()['c'];
+        $participating = (int)$conn->query("SELECT count(*) as c FROM participant WHERE user_id=$user_id AND status='active'")->fetch_assoc()['c'];
         
         // Get role-specific information
         $sf_result = $conn->query("SELECT roll_number, emp_number, department_class FROM student_faculty WHERE user_id = $user_id");

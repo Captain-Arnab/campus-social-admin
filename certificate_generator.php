@@ -1234,9 +1234,14 @@ function cert_achievement_phrase(string $key): string
         imgs.forEach(function (img) {
             if (!img.getAttribute('src')) return;
             if (img.complete && img.naturalWidth > 0) return;
+            // Resolve on load/error AND after a timeout so a slow or broken image
+            // can never leave the Download/Save button stuck in a loading state.
             pending.push(new Promise(function (resolve) {
-                img.onload = resolve;
-                img.onerror = resolve;
+                let done = false;
+                const finish = function () { if (!done) { done = true; resolve(); } };
+                img.onload = finish;
+                img.onerror = finish;
+                setTimeout(finish, 8000);
             }));
         });
         return pending.length ? Promise.all(pending) : Promise.resolve();

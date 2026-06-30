@@ -34,6 +34,32 @@ function certificate_public_url($file_path) {
     return $base === '' ? $file_path : ($base . '/' . $file_path);
 }
 
+/**
+ * Forced-download link. Clients should use this instead of the raw file URL so
+ * the download reliably completes (proper Content-Disposition + Content-Length).
+ */
+function certificate_download_url($cert_id) {
+    $base = certificates_admin_base_url();
+    $path = 'api/download_certificate.php?id=' . (int) $cert_id;
+    return $base === '' ? $path : ($base . '/' . $path);
+}
+
+/** True when the stored certificate file actually exists on disk. */
+function certificate_file_exists($file_path) {
+    if ($file_path === null || $file_path === '') {
+        return false;
+    }
+    $rel = str_replace('\\', '/', trim($file_path));
+    if (preg_match('#^https?://#i', $rel)) {
+        return true; // external URL — assume reachable
+    }
+    $rel = ltrim($rel, '/');
+    if (strpos($rel, '..') !== false) {
+        return false;
+    }
+    return is_file(__DIR__ . '/../' . $rel);
+}
+
 $method = $_SERVER['REQUEST_METHOD'];
 
 if ($method !== 'GET') {
@@ -77,6 +103,8 @@ if ($user_id > 0) {
             'file_path' => $rel,
             'certificate_url' => $abs,
             'url' => $abs,
+            'download_url' => certificate_download_url($row['id']),
+            'file_exists' => certificate_file_exists($rel),
             'uploaded_at' => $row['uploaded_at'],
         ];
         if (!empty($row['event_end_date']) && ($row['event_end_date'] ?? '') !== '0000-00-00 00:00:00') {
@@ -113,6 +141,8 @@ if ($event_id > 0) {
             'file_path' => $rel,
             'certificate_url' => $abs,
             'url' => $abs,
+            'download_url' => certificate_download_url($row['id']),
+            'file_exists' => certificate_file_exists($rel),
             'uploaded_at' => $row['uploaded_at'],
         ];
     }
