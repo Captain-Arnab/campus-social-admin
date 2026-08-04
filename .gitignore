@@ -2,6 +2,7 @@
 db.php
 api/db.php
 college_event_db.sql
+migrations/*
 
 # Firebase service account key (do not commit)
 api/firebase-service-account.json

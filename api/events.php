@@ -1,8 +1,26 @@
 <?php
 include 'db.php';
 require_once __DIR__ . '/sms_helper.php';
+require_once __DIR__ . '/background_jobs_helper.php';
 require_once __DIR__ . '/../event_date_range_schema.php';
 $method = $_SERVER['REQUEST_METHOD'];
+
+/**
+ * Timing helper for publish/create path — writes to PHP error_log.
+ * Pass $bucket (array) to also collect ms for optional JSON debug output.
+ */
+function events_api_time_mark(string $label, float &$last, float $t0, ?array &$bucket = null): void
+{
+    $now = microtime(true);
+    $stepMs  = ($now - $last) * 1000;
+    $totalMs = ($now - $t0) * 1000;
+    error_log(sprintf('[events.php CREATE] %s: +%.1fms (total %.1fms)', $label, $stepMs, $totalMs));
+    if ($bucket !== null) {
+        $bucket[$label] = round($stepMs, 1);
+        $bucket['_total_ms'] = round($totalMs, 1);
+    }
+    $last = $now;
+}
 
 /** Public web base for deep links / share sheet (override with MICAMPUS_PUBLIC_BASE). */
 function events_api_public_base(): string
@@ -487,7 +505,13 @@ elseif ($method == 'POST') {
         exit();
     }
 
-    // --- CREATE EVENT ---
+    // --- CREATE EVENT (Host / Publish from Flutter) ---
+    // Slow work (admin SMS + inbox fan-out + per-token FCM) is queued for cron.
+    $t0 = microtime(true);
+    $tMark = $t0;
+    $timings = [];
+    $debugTiming = !empty($_POST['debug_timing']) || (isset($_GET['debug_timing']) && $_GET['debug_timing']);
+
     if (!isset($_POST['title']) || !isset($_POST['user_id'])) {
         echo json_encode(["status" => "error", "message" => "Event-er proyojonio details dewa hoyni"]);
         exit();
@@ -507,6 +531,7 @@ elseif ($method == 'POST') {
         echo json_encode(["status" => "error", "message" => "Event end date/time must be on or after the start"]);
         exit();
     }
+    events_api_time_mark('validate_input', $tMark, $t0, $timings);
 
     $title = $conn->real_escape_string($title_plain);
     $desc = $conn->real_escape_string($_POST['description'] ?? '');
@@ -516,54 +541,118 @@ elseif ($method == 'POST') {
     $rules = $conn->real_escape_string($_POST['rules'] ?? '');
     $organizer_id = intval($_POST['user_id']);
 
+    // Banner handling:
+    // PHP must consume $_FILES in this request (tmp files are deleted when the script ends).
+    // We only move_uploaded_file here (fast local I/O). SMS/FCM stay off the hot path.
+    // Optional: defer_banners=1 stores files under uploads/events/_staging/ and queues
+    // event_banners_finalize so the INSERT response does not wait on large multi-file I/O
+    // beyond the initial move into staging.
+    $deferBanners = !empty($_POST['defer_banners']);
     $image_paths = [];
+    $staged_files = [];
+    $uploadRoot = __DIR__ . '/../uploads/events';
+    $stagingDir = $uploadRoot . '/_staging';
+
     if (isset($_FILES['banners']) && !empty($_FILES['banners']['tmp_name'][0])) {
-        if (!is_dir('../uploads/events/')) {
-            mkdir('../uploads/events/', 0777, true);
+        $targetDir = $deferBanners ? $stagingDir : $uploadRoot;
+        if (!is_dir($targetDir)) {
+            mkdir($targetDir, 0777, true);
         }
         foreach ($_FILES['banners']['tmp_name'] as $key => $tmp_name) {
-            if ($_FILES['banners']['error'][$key] === UPLOAD_ERR_OK) {
-                $filename = "evt_" . time() . "_" . $key . "_" . basename($_FILES['banners']['name'][$key]);
-                if (move_uploaded_file($tmp_name, "../uploads/events/" . $filename)) {
+            if ($_FILES['banners']['error'][$key] !== UPLOAD_ERR_OK || $tmp_name === '') {
+                continue;
+            }
+            $safeBase = preg_replace('/[^A-Za-z0-9._-]/', '_', basename((string) $_FILES['banners']['name'][$key]));
+            $filename = 'evt_' . time() . '_' . $key . '_' . $safeBase;
+            if (move_uploaded_file($tmp_name, $targetDir . '/' . $filename)) {
+                if ($deferBanners) {
+                    $staged_files[] = $filename;
+                } else {
                     $image_paths[] = $filename;
                 }
             }
         }
     }
-    $banners_json = json_encode($image_paths);
+    // When deferring, banners column starts empty; worker fills it after promote.
+    $banners_json = json_encode($deferBanners ? [] : $image_paths);
+    $banners_esc = $conn->real_escape_string($banners_json);
+    events_api_time_mark('banner_upload', $tMark, $t0, $timings);
 
     if (schema_events_has_event_end_date($conn)) {
         if ($end_raw === null || $end_raw === '') {
             $sql = "INSERT INTO events (title, description, event_date, event_end_date, category, venue, status, organizer_id, banners, rules) 
-            VALUES ('$title', '$desc', '$date_esc', NULL, '$cat', '$venue', 'pending', $organizer_id, '$banners_json', '$rules')";
+            VALUES ('$title', '$desc', '$date_esc', NULL, '$cat', '$venue', 'pending', $organizer_id, '$banners_esc', '$rules')";
         } else {
             $end_esc = $conn->real_escape_string($end_raw);
             $sql = "INSERT INTO events (title, description, event_date, event_end_date, category, venue, status, organizer_id, banners, rules) 
-            VALUES ('$title', '$desc', '$date_esc', '$end_esc', '$cat', '$venue', 'pending', $organizer_id, '$banners_json', '$rules')";
+            VALUES ('$title', '$desc', '$date_esc', '$end_esc', '$cat', '$venue', 'pending', $organizer_id, '$banners_esc', '$rules')";
         }
     } else {
         $sql = "INSERT INTO events (title, description, event_date, category, venue, status, organizer_id, banners, rules) 
-            VALUES ('$title', '$desc', '$date_esc', '$cat', '$venue', 'pending', $organizer_id, '$banners_json', '$rules')";
+            VALUES ('$title', '$desc', '$date_esc', '$cat', '$venue', 'pending', $organizer_id, '$banners_esc', '$rules')";
     }
 
     if ($conn->query($sql)) {
         $new_id = (int) $conn->insert_id;
-        $title_for_sms = $title_plain;
-        if ($title_for_sms !== '') {
-            sms_notify_admins_event_created($conn, $title_for_sms);
-        }
+        events_api_time_mark('db_insert', $tMark, $t0, $timings);
+
+        // Queue SMS + inbox + FCM (was inline — caused 10–20s+ timeouts).
+        $jobId = 0;
         if ($new_id > 0) {
-            $inbox_helper = __DIR__ . '/app_inbox_notifications_helper.php';
-            if (is_readable($inbox_helper)) {
-                require_once $inbox_helper;
+            $jobId = bg_jobs_enqueue($conn, 'event_created_notify', [
+                'event_id' => $new_id,
+                'title'    => $title_plain,
+                'category' => $cat_plain,
+                'venue'    => $venue_plain,
+            ]);
+            if ($jobId <= 0) {
+                // Fallback: never lose the notify path if queue insert fails.
+                error_log('[events.php CREATE] queue enqueue failed; falling back to inline notify');
                 try {
-                    campus_inbox_after_event_created($conn, $new_id, $title_plain, $cat_plain, $venue_plain);
+                    if ($title_plain !== '') {
+                        sms_notify_admins_event_created($conn, $title_plain);
+                    }
+                    $inbox_helper = __DIR__ . '/app_inbox_notifications_helper.php';
+                    if (is_readable($inbox_helper)) {
+                        require_once $inbox_helper;
+                        campus_inbox_after_event_created($conn, $new_id, $title_plain, $cat_plain, $venue_plain);
+                    }
                 } catch (Throwable $e) {
-                    error_log('[events.php] campus_inbox_after_event_created: ' . $e->getMessage());
+                    error_log('[events.php CREATE] inline notify fallback: ' . $e->getMessage());
                 }
             }
+
+            if ($deferBanners && $staged_files !== []) {
+                bg_jobs_enqueue($conn, 'event_banners_finalize', [
+                    'event_id'     => $new_id,
+                    'staged_files' => $staged_files,
+                ]);
+            }
         }
-        echo json_encode(["status" => "success", "message" => "Event-ti admin-er approval-er jonyo pathano hoyechhe", "id" => $new_id]);
+        events_api_time_mark('enqueue_jobs', $tMark, $t0, $timings);
+
+        // Slim payload for Flutter post-publish (no nested organizer / full rules / description).
+        $response = [
+            'status'  => 'success',
+            'message' => 'Event-ti admin-er approval-er jonyo pathano hoyechhe',
+            'id'      => $new_id,
+            'event'   => [
+                'id'             => $new_id,
+                'title'          => $title_plain,
+                'status'         => 'pending',
+                'event_date'     => $start_raw,
+                'event_end_date' => ($end_raw !== null && $end_raw !== '') ? $end_raw : null,
+                'category'       => $cat_plain,
+                'venue'          => $venue_plain,
+                'banner_count'   => $deferBanners ? count($staged_files) : count($image_paths),
+            ],
+            'notify_queued' => $jobId > 0,
+        ];
+        if ($debugTiming) {
+            $response['timings_ms'] = $timings;
+        }
+        events_api_time_mark('response_ready', $tMark, $t0, $timings);
+        echo json_encode($response);
     } else {
         echo json_encode(["status" => "error", "message" => "Database error: " . $conn->error]);
     }
