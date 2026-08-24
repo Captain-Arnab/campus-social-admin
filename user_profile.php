@@ -107,10 +107,24 @@ $participated_events = $conn->query("
     <?php include 'sidebar.php'; ?>
 
     <div class="main-content">
-        <div class="mb-4">
-            <a href="users.php" class="btn btn-white rounded-pill shadow-sm border px-4 btn-sm fw-bold text-muted">
+        <div class="mb-4 d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <a href="users.php?view=<?php echo ((int)$user['is_student'] === 1) ? 'students' : 'faculty'; ?>" class="btn btn-white rounded-pill shadow-sm border px-4 btn-sm fw-bold text-muted">
                 <i class="fas fa-arrow-left me-2"></i> User Registry
             </a>
+            <div class="d-flex flex-wrap gap-2">
+                <?php if (($user['status'] ?? '') === 'active'): ?>
+                    <button type="button" onclick="toggleUser(<?php echo (int)$user_id; ?>, 'block')" class="btn btn-outline-danger rounded-pill btn-sm fw-bold px-3">
+                        <i class="fas fa-ban me-1"></i> Block
+                    </button>
+                <?php else: ?>
+                    <button type="button" onclick="toggleUser(<?php echo (int)$user_id; ?>, 'unblock')" class="btn btn-outline-success rounded-pill btn-sm fw-bold px-3">
+                        <i class="fas fa-unlock me-1"></i> Unblock
+                    </button>
+                <?php endif; ?>
+                <button type="button" onclick="deleteUser(<?php echo (int)$user_id; ?>)" class="btn btn-danger rounded-pill btn-sm fw-bold px-3">
+                    <i class="fas fa-trash-alt me-1"></i> Delete
+                </button>
+            </div>
         </div>
 
         <div class="profile-card mb-5">
@@ -256,5 +270,39 @@ $participated_events = $conn->query("
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script>
+        const profileView = '<?php echo ((int)$user['is_student'] === 1) ? 'students' : 'faculty'; ?>';
+
+        function toggleUser(id, action) {
+            Swal.fire({
+                title: 'Confirm',
+                text: `Are you sure you want to ${action} this user?`,
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#FF5F15'
+            }).then((res) => {
+                if (res.isConfirmed) {
+                    window.location.href = `manage_user.php?id=${id}&action=${action}&type=user&view=${encodeURIComponent(profileView)}`;
+                }
+            });
+        }
+
+        function deleteUser(id) {
+            Swal.fire({
+                title: 'Delete this user?',
+                html: 'This permanently removes the account. Any events they hosted will also be deleted. This cannot be undone.',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#c0392b',
+                confirmButtonText: 'Yes, delete',
+                cancelButtonText: 'Cancel'
+            }).then((res) => {
+                if (res.isConfirmed) {
+                    window.location.href = `manage_user.php?id=${id}&action=delete&type=user&view=${encodeURIComponent(profileView)}`;
+                }
+            });
+        }
+    </script>
 </body>
 </html>

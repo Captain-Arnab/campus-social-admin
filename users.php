@@ -106,6 +106,9 @@ if (isset($_GET['ajax_filter'])) {
                                 <i class="fas fa-unlock"></i>
                             </button>
                         <?php endif; ?>
+                        <button onclick="deleteUser(<?php echo $row['id']; ?>)" class="btn-icon btn-delete" title="Delete User">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>
                     </div>
                 </td>
             </tr>
@@ -210,6 +213,8 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
         .btn-block:hover { background-color: #e74c3c; color: white; }
         .btn-unblock { background-color: #f0fdf4; color: #2ecc71; }
         .btn-unblock:hover { background-color: #2ecc71; color: white; }
+        .btn-delete { background-color: #f8f9fa; color: #6c757d; }
+        .btn-delete:hover { background-color: #c0392b; color: white; }
 
         .user-link { text-decoration: none; transition: 0.2s; }
         .user-link:hover { color: var(--brand-color) !important; }
@@ -345,6 +350,7 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
                                     <?php else: ?>
                                         <button onclick="toggleUser(<?php echo $row['id']; ?>, 'unblock')" class="btn-icon btn-unblock" title="Unblock"><i class="fas fa-unlock"></i></button>
                                     <?php endif; ?>
+                                    <button onclick="deleteUser(<?php echo $row['id']; ?>)" class="btn-icon btn-delete" title="Delete"><i class="fas fa-trash-alt"></i></button>
                                 </div>
                             </td>
                         </tr>
@@ -362,16 +368,18 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
         (function showMsgAlert() {
             const params = new URLSearchParams(window.location.search);
             const msg = params.get('msg');
+            const clearMsg = () => {
+                params.delete('msg');
+                window.history.replaceState({}, '', 'users.php' + (params.toString() ? '?' + params.toString() : ''));
+            };
             if (msg === 'blocked') {
-                Swal.fire('User blocked', 'The user has been blocked.', 'success').then(() => {
-                    params.delete('msg');
-                    window.history.replaceState({}, '', 'users.php' + (params.toString() ? '?' + params.toString() : ''));
-                });
+                Swal.fire('User blocked', 'The user has been blocked.', 'success').then(clearMsg);
             } else if (msg === 'unblocked') {
-                Swal.fire('User unblocked', 'The user has been unblocked.', 'success').then(() => {
-                    params.delete('msg');
-                    window.history.replaceState({}, '', 'users.php' + (params.toString() ? '?' + params.toString() : ''));
-                });
+                Swal.fire('User unblocked', 'The user has been unblocked.', 'success').then(clearMsg);
+            } else if (msg === 'deleted') {
+                Swal.fire('User deleted', 'The user account and related records have been removed.', 'success').then(clearMsg);
+            } else if (msg === 'delete_failed') {
+                Swal.fire('Delete failed', 'Could not delete this user. Please try again.', 'error').then(clearMsg);
             }
         })();
 
@@ -402,7 +410,27 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
             Swal.fire({
                 title: 'Confirm', text: `Are you sure you want to ${action} this user?`, icon: 'warning',
                 showCancelButton: true, confirmButtonColor: '#FF5F15'
-            }).then((res) => { if (res.isConfirmed) window.location.href = `manage_user.php?id=${id}&action=${action}&type=user`; });
+            }).then((res) => {
+                if (res.isConfirmed) {
+                    window.location.href = `manage_user.php?id=${id}&action=${action}&type=user&view=${encodeURIComponent(currentView)}`;
+                }
+            });
+        }
+
+        function deleteUser(id) {
+            Swal.fire({
+                title: 'Delete this user?',
+                html: 'This permanently removes the account. Any events they hosted will also be deleted. This cannot be undone.',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#c0392b',
+                confirmButtonText: 'Yes, delete',
+                cancelButtonText: 'Cancel'
+            }).then((res) => {
+                if (res.isConfirmed) {
+                    window.location.href = `manage_user.php?id=${id}&action=delete&type=user&view=${encodeURIComponent(currentView)}`;
+                }
+            });
         }
     </script>
 </body>
