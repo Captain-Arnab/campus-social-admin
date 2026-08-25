@@ -47,6 +47,23 @@ function normalize_subadmin_privileges(array $keys, array $defs): array
     return $out;
 }
 
+/** Username must be unique across admins + subadmins (shared login). */
+function username_already_taken(mysqli $conn, string $username, int $exclude_subadmin_id = 0): bool
+{
+    $u_esc = $conn->real_escape_string($username);
+    $admin_dup = $conn->query("SELECT id FROM admins WHERE LOWER(username) = LOWER('$u_esc') LIMIT 1");
+    if ($admin_dup && $admin_dup->num_rows > 0) {
+        return true;
+    }
+    $sql = "SELECT id FROM subadmins WHERE LOWER(username) = LOWER('$u_esc')";
+    if ($exclude_subadmin_id > 0) {
+        $sql .= ' AND id <> ' . (int) $exclude_subadmin_id;
+    }
+    $sql .= ' LIMIT 1';
+    $sub_dup = $conn->query($sql);
+    return $sub_dup && $sub_dup->num_rows > 0;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
@@ -62,28 +79,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $err = 'Username, password, and full name are required.';
         } elseif ($privs === []) {
             $err = 'Select at least one privilege (dashboard is added automatically if you pick any other).';
+        } elseif (username_already_taken($conn, $username)) {
+            $err = 'This username is already taken. Please choose a different username.';
         } else {
             $u_esc = $conn->real_escape_string($username);
-            $dup = $conn->query("SELECT id FROM subadmins WHERE username = '$u_esc' LIMIT 1");
-            if ($dup && $dup->num_rows > 0) {
-                $err = 'Username already exists.';
-            } else {
-                $hash = password_hash($password, PASSWORD_DEFAULT);
-                $fn_esc = $conn->real_escape_string($full_name);
-                $em_esc = $email !== '' ? "'" . $conn->real_escape_string($email) . "'" : 'NULL';
-                $hash_esc = $conn->real_escape_string($hash);
-                if ($conn->query("INSERT INTO subadmins (username, password, full_name, email, status) VALUES ('$u_esc', '$hash_esc', '$fn_esc', $em_esc, 'active')")) {
-                    $sid = (int) $conn->insert_id;
-                    foreach ($privs as $p) {
-                        $ins = $conn->prepare('INSERT INTO subadmin_privileges (subadmin_id, privilege) VALUES (?, ?)');
-                        $ins->bind_param('is', $sid, $p);
-                        $ins->execute();
-                        $ins->close();
-                    }
-                    subadmin_flash_redirect('Sub-admin created.');
-                } else {
-                    $err = 'Could not create account: ' . $conn->error;
+            $hash = password_hash($password, PASSWORD_DEFAULT);
+            $fn_esc = $conn->real_escape_string($full_name);
+            $em_esc = $email !== '' ? "'" . $conn->real_escape_string($email) . "'" : 'NULL';
+            $hash_esc = $conn->real_escape_string($hash);
+            if ($conn->query("INSERT INTO subadmins (username, password, full_name, email, status) VALUES ('$u_esc', '$hash_esc', '$fn_esc', $em_esc, 'active')")) {
+                $sid = (int) $conn->insert_id;
+                foreach ($privs as $p) {
+                    $ins = $conn->prepare('INSERT INTO subadmin_privileges (subadmin_id, privilege) VALUES (?, ?)');
+                    $ins->bind_param('is', $sid, $p);
+                    $ins->execute();
+                    $ins->close();
                 }
+                subadmin_flash_redirect('Sub-admin created.');
+            } else {
+                $err = 'Could not create account: ' . $conn->error;
             }
         }
     } elseif ($action === 'update_subadmin') {
@@ -106,39 +120,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $err = 'Password confirmation does not match.';
         } elseif ($password !== '' && strlen($password) < 6) {
             $err = 'Password must be at least 6 characters.';
+        } elseif (username_already_taken($conn, $username, $sid)) {
+            $err = 'This username is already taken. Please choose a different username.';
         } else {
             $u_esc = $conn->real_escape_string($username);
-            $dup = $conn->query("SELECT id FROM subadmins WHERE username = '$u_esc' AND id <> $sid LIMIT 1");
-            if ($dup && $dup->num_rows > 0) {
-                $err = 'Username already exists.';
-            } else {
-                $conn->begin_transaction();
-                try {
-                    $fn_esc = $conn->real_escape_string($full_name);
-                    $em_sql = $email !== '' ? "'" . $conn->real_escape_string($email) . "'" : 'NULL';
-                    if ($password !== '') {
-                        $hash = password_hash($password, PASSWORD_DEFAULT);
-                        $h_esc = $conn->real_escape_string($hash);
-                        $ok = $conn->query("UPDATE subadmins SET username = '$u_esc', full_name = '$fn_esc', email = $em_sql, password = '$h_esc' WHERE id = $sid");
-                    } else {
-                        $ok = $conn->query("UPDATE subadmins SET username = '$u_esc', full_name = '$fn_esc', email = $em_sql WHERE id = $sid");
-                    }
-                    if (!$ok) {
-                        throw new RuntimeException('profile');
-                    }
-                    $conn->query('DELETE FROM subadmin_privileges WHERE subadmin_id = ' . $sid);
-                    foreach ($privs as $p) {
-                        $ins = $conn->prepare('INSERT INTO subadmin_privileges (subadmin_id, privilege) VALUES (?, ?)');
-                        $ins->bind_param('is', $sid, $p);
-                        $ins->execute();
-                        $ins->close();
-                    }
-                    $conn->commit();
-                    subadmin_flash_redirect('Sub-admin updated.');
-                } catch (Throwable $e) {
-                    $conn->rollback();
-                    $err = 'Update failed.';
+            $conn->begin_transaction();
+            try {
+                $fn_esc = $conn->real_escape_string($full_name);
+                $em_sql = $email !== '' ? "'" . $conn->real_escape_string($email) . "'" : 'NULL';
+                if ($password !== '') {
+                    $hash = password_hash($password, PASSWORD_DEFAULT);
+                    $h_esc = $conn->real_escape_string($hash);
+                    $ok = $conn->query("UPDATE subadmins SET username = '$u_esc', full_name = '$fn_esc', email = $em_sql, password = '$h_esc' WHERE id = $sid");
+                } else {
+                    $ok = $conn->query("UPDATE subadmins SET username = '$u_esc', full_name = '$fn_esc', email = $em_sql WHERE id = $sid");
                 }
+                if (!$ok) {
+                    throw new RuntimeException('profile');
+                }
+                $conn->query('DELETE FROM subadmin_privileges WHERE subadmin_id = ' . $sid);
+                foreach ($privs as $p) {
+                    $ins = $conn->prepare('INSERT INTO subadmin_privileges (subadmin_id, privilege) VALUES (?, ?)');
+                    $ins->bind_param('is', $sid, $p);
+                    $ins->execute();
+                    $ins->close();
+                }
+                $conn->commit();
+                subadmin_flash_redirect('Sub-admin updated.');
+            } catch (Throwable $e) {
+                $conn->rollback();
+                $err = 'Update failed.';
             }
         }
     } elseif ($action === 'toggle_status') {
