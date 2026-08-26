@@ -401,6 +401,11 @@ if ($user_type == 'admin') {
                     <i class="fas fa-user-shield"></i> Sub-admins
                 </a>
             </li>
+            <li class="nav-item">
+                <a href="sms_jobs.php" class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'sms_jobs.php' ? 'active' : ''; ?>">
+                    <i class="fas fa-sms"></i> SMS / OTP jobs
+                </a>
+            </li>
             <?php endif; ?>
             <?php endif; ?>
         </ul>

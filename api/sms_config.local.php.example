@@ -1,0 +1,20 @@
+<?php
+/**
+ * Example SMS gateway config. Copy to sms_config.local.php and fill in real values.
+ * sms_config.local.php should NOT be committed (add to .gitignore if needed).
+ */
+return [
+    'base_url' => 'https://YOUR-GATEWAY-HOST/api/sms', // ConnectBind-style GET endpoint
+    'username' => '',
+    'password' => '',
+    'sender_id' => 'MiCamp',
+    'entity_id' => '',           // DLT Entity ID
+    'template_id' => '',         // DLT Template ID for login OTP
+    'tmid' => '',                // Template Message ID / PE ID as required by gateway
+    'otp_message_template' =>
+        'Your OTP for MiCampus login is {OTP}. Please do not share this code with anyone. Valid for 10 minutes. Micampus.co.in',
+    // Optional: event-created admin SMS
+    'event_created_template_id' => '',
+    'event_created_tmid' => '',
+    'admin_event_notify_phones' => [],
+];

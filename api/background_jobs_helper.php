@@ -144,6 +144,71 @@ function bg_jobs_claim($conn, int $limit = 10): array
 }
 
 /**
+ * Claim a specific pending job by id (for inline OTP processing).
+ *
+ * @param mysqli $conn
+ * @return array{id:int,job_type:string,payload_json:string,attempts:int,max_attempts:int}|null
+ */
+function bg_jobs_claim_id($conn, int $id): ?array
+{
+    if ($id <= 0 || !bg_jobs_ensure_table($conn)) {
+        return null;
+    }
+    $now = date('Y-m-d H:i:s');
+    $upd = $conn->prepare(
+        "UPDATE background_jobs
+            SET status = 'processing', locked_at = ?, attempts = attempts + 1
+          WHERE id = ? AND status = 'pending'"
+    );
+    if (!$upd) {
+        return null;
+    }
+    $upd->bind_param('si', $now, $id);
+    $upd->execute();
+    $affected = $upd->affected_rows;
+    $upd->close();
+    if ($affected !== 1) {
+        return null;
+    }
+    $get = $conn->prepare(
+        'SELECT id, job_type, payload_json, attempts, max_attempts
+           FROM background_jobs WHERE id = ?'
+    );
+    if (!$get) {
+        return null;
+    }
+    $get->bind_param('i', $id);
+    $get->execute();
+    $job = $get->get_result()->fetch_assoc();
+    $get->close();
+    return $job ?: null;
+}
+
+/**
+ * Force-fail a job (no retry) — used when OTP must fail loudly to the client.
+ *
+ * @param mysqli $conn
+ */
+function bg_jobs_mark_failed_final($conn, int $id, string $error): void
+{
+    if (function_exists('mb_substr')) {
+        $error = mb_substr($error, 0, 2000);
+    } else {
+        $error = substr($error, 0, 2000);
+    }
+    $stmt = $conn->prepare(
+        "UPDATE background_jobs
+            SET status = 'failed', last_error = ?, locked_at = NULL
+          WHERE id = ?"
+    );
+    if ($stmt) {
+        $stmt->bind_param('si', $error, $id);
+        $stmt->execute();
+        $stmt->close();
+    }
+}
+
+/**
  * @param mysqli $conn
  */
 function bg_jobs_mark_done($conn, int $id): void

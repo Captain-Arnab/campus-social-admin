@@ -73,7 +73,8 @@ foreach ($jobs as $job) {
                 process_job_event_banners_finalize($conn, $payload);
                 break;
             case 'login_otp_sms':
-                process_job_login_otp_sms($payload);
+                $payload['job_id'] = $id;
+                process_job_login_otp_sms($payload, $conn, 15);
                 break;
             default:
                 throw new RuntimeException('Unknown job_type: ' . $type);
@@ -104,24 +105,6 @@ if (php_sapi_name() !== 'cli') {
 }
 
 // ─── Job handlers ────────────────────────────────────────────────────────────
-
-/**
- * SMS OTP delivery moved off POST /users.php?action=send_login_otp (was sync, up to 30s).
- *
- * @param array<string,mixed> $payload destination (91XXXXXXXXXX), message (DLT text with OTP)
- */
-function process_job_login_otp_sms(array $payload): void
-{
-    $dest = (string) ($payload['destination'] ?? '');
-    $message = (string) ($payload['message'] ?? '');
-    if ($dest === '' || $message === '') {
-        throw new InvalidArgumentException('destination and message required');
-    }
-    $send = sms_send_connectbind($dest, $message);
-    if (!$send['ok']) {
-        throw new RuntimeException('SMS failed: ' . ($send['error'] ?? $send['body']));
-    }
-}
 
 /**
  * Slow path moved off POST /events.php create:

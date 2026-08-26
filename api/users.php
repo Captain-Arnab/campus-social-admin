@@ -246,9 +246,41 @@ if ($method == 'POST') {
             exit();
         }
 
+        // Process OTP SMS in this request so delivery does not depend on cron.
+        // Job row remains for audit / retry if this attempt times out later via worker.
+        $claimed = bg_jobs_claim_id($conn, $jobId);
+        if ($claimed === null) {
+            error_log('[users.php send_login_otp] claim failed job_id=' . $jobId);
+            echo json_encode([
+                "status"  => "error",
+                "message" => "Could not start OTP SMS. Please try again.",
+            ]);
+            exit();
+        }
+
+        try {
+            process_job_login_otp_sms([
+                'user_id'     => $user_id,
+                'destination' => $dest,
+                'message'     => $message,
+                'job_id'      => $jobId,
+            ], $conn, 10);
+            bg_jobs_mark_done($conn, $jobId);
+        } catch (Throwable $e) {
+            $errMsg = $e->getMessage();
+            bg_jobs_mark_failed_final($conn, $jobId, $errMsg);
+            error_log('[users.php send_login_otp] SMS failed job_id=' . $jobId . ' ' . $errMsg);
+            echo json_encode([
+                "status"  => "error",
+                "message" => "SMS could not be sent. Please try again.",
+                "detail"  => $errMsg,
+            ]);
+            exit();
+        }
+
         echo json_encode([
             "status"  => "success",
-            "message" => "OTP is being sent to your registered mobile number",
+            "message" => "OTP sent to your registered mobile number",
         ]);
     }
     

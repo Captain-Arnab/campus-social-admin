@@ -66,10 +66,153 @@ function sms_load_config() {
 }
 
 /**
+ * Interpret ConnectBind-style gateway HTTP + body. Many gateways return HTTP 200
+ * with an error string in the body — HTTP status alone is not enough.
+ *
+ * @return array{ok: bool, error?: string}
+ */
+function sms_interpret_gateway_response(int $httpCode, string $body): array
+{
+    $bodyTrim = trim($body);
+    if ($httpCode < 200 || $httpCode >= 300) {
+        return [
+            'ok' => false,
+            'error' => 'HTTP ' . $httpCode . ($bodyTrim !== '' ? ': ' . $bodyTrim : ''),
+        ];
+    }
+    if ($bodyTrim === '') {
+        return ['ok' => false, 'error' => 'Empty gateway response body'];
+    }
+
+    $lower = strtolower($bodyTrim);
+    $failNeedles = [
+        'error',
+        'invalid',
+        'fail',
+        'insufficient',
+        'insufficient credit',
+        'insufficient balance',
+        'reject',
+        'unauthor',
+        'unauthorized',
+        'forbidden',
+        'template not',
+        'invalid template',
+        'dlt reject',
+        'blacklist',
+        'expired',
+        'not registered',
+        'not approved',
+        'ndnc',
+    ];
+    // Allow success phrases that may contain the word "template" etc.
+    $successNeedles = [
+        'message sent',
+        'msg sent',
+        'submitted',
+        'success',
+        'accepted',
+        'gid=',
+        'msgid',
+        'message id',
+    ];
+    foreach ($successNeedles as $okWord) {
+        if (strpos($lower, $okWord) !== false) {
+            return ['ok' => true];
+        }
+    }
+    // ConnectBind often returns "1701|<mobile>|<id>" on success
+    if (preg_match('/^1701\|/', $bodyTrim)) {
+        return ['ok' => true];
+    }
+    // Numeric-only or pipe-delimited acceptance codes
+    if (preg_match('/^\d+(\|\d+)+$/', $bodyTrim) || preg_match('/^\d{4,}$/', $bodyTrim)) {
+        return ['ok' => true];
+    }
+    foreach ($failNeedles as $bad) {
+        if (strpos($lower, $bad) !== false) {
+            return ['ok' => false, 'error' => $bodyTrim];
+        }
+    }
+    // Unknown body with HTTP 200 — treat as success but leave body for logs
+    return ['ok' => true];
+}
+
+/**
+ * Persist SMS attempt for debugging (best effort).
+ *
+ * @param mysqli|null $conn
+ * @param array<string,mixed> $result from sms_send_connectbind
+ */
+function sms_log_attempt($conn, string $purpose, string $destination, array $result, ?int $jobId = null, ?int $userId = null): void
+{
+    $ok = !empty($result['ok']) ? 1 : 0;
+    $http = (int) ($result['http_code'] ?? 0);
+    $body = (string) ($result['body'] ?? '');
+    $err = (string) ($result['error'] ?? '');
+    if (function_exists('mb_substr')) {
+        $body = mb_substr($body, 0, 2000);
+        $err = mb_substr($err, 0, 2000);
+    } else {
+        $body = substr($body, 0, 2000);
+        $err = substr($err, 0, 2000);
+    }
+
+    error_log(sprintf(
+        '[sms_log] purpose=%s dest=%s ok=%d http=%d err=%s body=%s',
+        $purpose,
+        $destination,
+        $ok,
+        $http,
+        $err,
+        substr($body, 0, 300)
+    ));
+
+    if (!$conn) {
+        return;
+    }
+    static $ensured = null;
+    if ($ensured === null) {
+        $ensured = (bool) @$conn->query(
+            "CREATE TABLE IF NOT EXISTS `sms_log` (
+              `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+              `purpose` VARCHAR(64) NOT NULL DEFAULT '',
+              `destination` VARCHAR(20) NOT NULL DEFAULT '',
+              `user_id` INT NULL,
+              `job_id` BIGINT UNSIGNED NULL,
+              `ok` TINYINT(1) NOT NULL DEFAULT 0,
+              `http_code` INT NOT NULL DEFAULT 0,
+              `gateway_body` TEXT NULL,
+              `error_message` TEXT NULL,
+              `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`),
+              KEY `idx_sms_created` (`created_at`),
+              KEY `idx_sms_purpose_ok` (`purpose`, `ok`, `created_at`),
+              KEY `idx_sms_job` (`job_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+        );
+    }
+    if (!$ensured) {
+        return;
+    }
+    $purposeEsc = $conn->real_escape_string(substr($purpose, 0, 64));
+    $destEsc = $conn->real_escape_string(substr($destination, 0, 20));
+    $uidSql = $userId === null ? 'NULL' : (string) (int) $userId;
+    $jidSql = $jobId === null ? 'NULL' : (string) (int) $jobId;
+    $bodyEsc = $conn->real_escape_string($body);
+    $errEsc = $conn->real_escape_string($err);
+    @$conn->query(
+        "INSERT INTO sms_log (purpose, destination, user_id, job_id, ok, http_code, gateway_body, error_message)
+         VALUES ('$purposeEsc', '$destEsc', $uidSql, $jidSql, $ok, $http, '$bodyEsc', '$errEsc')"
+    );
+}
+
+/**
  * @param array<string, string>|null $templateOverrides Keys: template_id, tmid (optional). Uses defaults from config when omitted.
+ * @param int $timeoutSec HTTP timeout (OTP uses a shorter value so the API stays under client limits)
  * @return array{ok: bool, http_code: int, body: string, error?: string}
  */
-function sms_send_connectbind($destination91, $plainMessage, $templateOverrides = null) {
+function sms_send_connectbind($destination91, $plainMessage, $templateOverrides = null, int $timeoutSec = 30) {
     $cfg = sms_load_config();
     $tempid = $cfg['template_id'];
     $tmid = $cfg['tmid'] ?? '';
@@ -90,6 +233,7 @@ function sms_send_connectbind($destination91, $plainMessage, $templateOverrides 
     if ($tempid === '' || $tempid === null || $tmid === '' || $tmid === null) {
         return ['ok' => false, 'http_code' => 0, 'body' => '', 'error' => 'SMS template not configured'];
     }
+    $timeoutSec = max(3, min(30, $timeoutSec));
     $query = http_build_query([
         'username' => $cfg['username'],
         'password' => $cfg['password'],
@@ -108,7 +252,8 @@ function sms_send_connectbind($destination91, $plainMessage, $templateOverrides 
     if (function_exists('curl_init')) {
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeoutSec);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, min(5, $timeoutSec));
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
         $body = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -117,12 +262,22 @@ function sms_send_connectbind($destination91, $plainMessage, $templateOverrides 
         if ($body === false) {
             return ['ok' => false, 'http_code' => $code, 'body' => '', 'error' => $err ?: 'SMS request failed'];
         }
-        return ['ok' => $code >= 200 && $code < 300, 'http_code' => $code, 'body' => (string) $body];
+        $body = (string) $body;
+        $parsed = sms_interpret_gateway_response($code, $body);
+        if (!$parsed['ok']) {
+            return [
+                'ok' => false,
+                'http_code' => $code,
+                'body' => $body,
+                'error' => $parsed['error'] ?? 'Gateway rejected SMS',
+            ];
+        }
+        return ['ok' => true, 'http_code' => $code, 'body' => $body];
     }
 
     $ctx = stream_context_create([
         'http' => [
-            'timeout' => 30,
+            'timeout' => $timeoutSec,
             'ignore_errors' => true,
         ],
     ]);
@@ -134,7 +289,17 @@ function sms_send_connectbind($destination91, $plainMessage, $templateOverrides 
     if ($body === false) {
         return ['ok' => false, 'http_code' => $code, 'body' => '', 'error' => 'SMS request failed'];
     }
-    return ['ok' => $code >= 200 && $code < 300, 'http_code' => $code, 'body' => (string) $body];
+    $body = (string) $body;
+    $parsed = sms_interpret_gateway_response($code, $body);
+    if (!$parsed['ok']) {
+        return [
+            'ok' => false,
+            'http_code' => $code,
+            'body' => $body,
+            'error' => $parsed['error'] ?? 'Gateway rejected SMS',
+        ];
+    }
+    return ['ok' => true, 'http_code' => $code, 'body' => $body];
 }
 
 function sms_build_login_otp_message($otp) {
@@ -142,6 +307,37 @@ function sms_build_login_otp_message($otp) {
     $tpl = $cfg['otp_message_template'] ??
         'Your OTP for MiCampus login is {OTP}. Please do not share this code with anyone. Valid for 10 minutes. Micampus.co.in';
     return str_replace('{OTP}', (string) $otp, $tpl);
+}
+
+/**
+ * Send login OTP SMS (used by users.php inline and by background worker).
+ *
+ * @param array<string,mixed> $payload destination (91XXXXXXXXXX), message, optional user_id, job_id
+ * @param mysqli|null $conn
+ */
+function process_job_login_otp_sms(array $payload, $conn = null, int $timeoutSec = 10): void
+{
+    $dest = (string) ($payload['destination'] ?? '');
+    $message = (string) ($payload['message'] ?? '');
+    $userId = isset($payload['user_id']) ? (int) $payload['user_id'] : null;
+    $jobId = isset($payload['job_id']) ? (int) $payload['job_id'] : null;
+    if ($dest === '' || $message === '') {
+        throw new InvalidArgumentException('destination and message required');
+    }
+    if (!preg_match('/^91\d{10}$/', $dest)) {
+        throw new InvalidArgumentException('destination must be 91XXXXXXXXXX, got: ' . $dest);
+    }
+    $send = sms_send_connectbind($dest, $message, null, $timeoutSec);
+    sms_log_attempt($conn, 'login_otp', $dest, $send, $jobId, $userId > 0 ? $userId : null);
+    if (!$send['ok']) {
+        $detail = $send['error'] ?? '';
+        if ($detail === '' && !empty($send['body'])) {
+            $detail = (string) $send['body'];
+        }
+        throw new RuntimeException(
+            'SMS failed http=' . (int) ($send['http_code'] ?? 0) . ' ' . $detail
+        );
+    }
 }
 
 /**
