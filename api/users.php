@@ -1,6 +1,8 @@
 <?php
 include 'db.php';
 require_once __DIR__ . '/sms_helper.php';
+require_once __DIR__ . '/background_jobs_helper.php';
+require_once __DIR__ . '/api_timing_helper.php';
 require_once __DIR__ . '/../portal_auth.php';
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -20,6 +22,9 @@ if ($method == 'POST') {
     
     // 1. REGISTER
     if ($action == 'register') {
+        $tAuth = api_timing_start();
+        api_timing_register_shutdown($conn, 'users.php', 'register', $tAuth);
+
         $data = json_decode(file_get_contents("php://input"), true);
         
         // Check if JSON decode failed
@@ -84,8 +89,8 @@ if ($method == 'POST') {
             ? $conn->real_escape_string($data['profile_pic']) 
             : 'default_avatar.png';
 
-        // Check if email or phone already exists
-        $check = $conn->query("SELECT id FROM users WHERE LOWER(TRIM(email)) = '$email' OR phone = '$phone'");
+        // Check if email or phone already exists (email stored lowercase on insert — index-friendly)
+        $check = $conn->query("SELECT id FROM users WHERE email = '$email' OR phone = '$phone' LIMIT 1");
         if ($check->num_rows > 0) {
             echo json_encode(["status" => "error", "message" => "Email or Phone already registered"]);
             exit();
@@ -128,6 +133,9 @@ if ($method == 'POST') {
     
     // 2a. SEND LOGIN OTP (SMS; mobile only — same identifier + phone as login)
     elseif ($action == 'send_login_otp') {
+        $tAuth = api_timing_start();
+        api_timing_register_shutdown($conn, 'users.php', 'send_login_otp', $tAuth);
+
         $data = json_decode(file_get_contents("php://input"), true);
         
         if ($data === null) {
@@ -223,21 +231,32 @@ if ($method == 'POST') {
         }
         
         $message = sms_build_login_otp_message($otp);
-        $send = sms_send_connectbind($dest, $message);
-        if (!$send['ok']) {
+        $jobId = bg_jobs_enqueue($conn, 'login_otp_sms', [
+            'user_id'     => $user_id,
+            'destination' => $dest,
+            'message'     => $message,
+        ], 0, 3);
+
+        if ($jobId <= 0) {
+            error_log('[users.php send_login_otp] queue enqueue failed for user_id=' . $user_id);
             echo json_encode([
-                "status" => "error",
-                "message" => "SMS could not be sent",
-                "detail" => $send['error'] ?? $send['body']
+                "status"  => "error",
+                "message" => "Could not queue OTP SMS. Please try again in a moment.",
             ]);
             exit();
         }
-        
-        echo json_encode(["status" => "success", "message" => "OTP sent to your registered mobile number"]);
+
+        echo json_encode([
+            "status"  => "success",
+            "message" => "OTP is being sent to your registered mobile number",
+        ]);
     }
     
     // 2. LOGIN (password or OTP when by_mobile=1)
     elseif ($action == 'login') {
+        $tAuth = api_timing_start();
+        api_timing_register_shutdown($conn, 'users.php', 'login', $tAuth);
+
         $data = json_decode(file_get_contents("php://input"), true);
         
         if ($data === null) {
