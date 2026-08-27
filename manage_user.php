@@ -39,25 +39,103 @@ function admin_delete_event_dependents(mysqli $conn, int $event_id): void
     }
 }
 
-function users_redirect(string $msg, string $view = ''): void
+function users_redirect(string $msg, string $view = '', int $page = 1, array $filters = []): void
 {
     $params = ['msg' => $msg];
     if ($view === 'students' || $view === 'faculty') {
         $params['view'] = $view;
     }
+    if ($page > 1) {
+        $params['page'] = $page;
+    }
+    foreach (['name', 'email', 'phone', 'date'] as $filter) {
+        if (!empty($filters[$filter])) {
+            $params[$filter] = $filters[$filter];
+        }
+    }
     header('Location: users.php?' . http_build_query($params));
     exit();
+}
+
+$view = isset($_GET['view']) ? (string) $_GET['view'] : '';
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$filters = [];
+foreach (['name', 'email', 'phone', 'date'] as $filter) {
+    if (isset($_GET[$filter])) {
+        $filters[$filter] = trim((string) $_GET[$filter]);
+    }
+}
+
+if (isset($_GET['ids']) && isset($_GET['action']) && $_GET['type'] === 'user') {
+    $ids = array_values(array_unique(array_filter(array_map('intval', explode(',', (string) $_GET['ids'])), static function (int $id): bool {
+        return $id > 0;
+    })));
+    $bulk_action = (string) $_GET['action'];
+
+    if (empty($ids) || !in_array($bulk_action, ['bulk_block', 'bulk_unblock', 'bulk_delete'], true)) {
+        users_redirect('bulk_failed', $view, $page, $filters);
+    }
+
+    $id_list = implode(',', $ids);
+    if ($bulk_action === 'bulk_block' || $bulk_action === 'bulk_unblock') {
+        $new_status = $bulk_action === 'bulk_block' ? 'blocked' : 'active';
+        $stmt = $conn->prepare("UPDATE users SET status = ? WHERE id IN ($id_list)");
+        $stmt->bind_param('s', $new_status);
+        $success = $stmt->execute();
+        $stmt->close();
+        users_redirect($success ? ($new_status === 'blocked' ? 'blocked' : 'unblocked') : 'bulk_failed', $view, $page, $filters);
+    }
+
+    $conn->begin_transaction();
+    try {
+        $hosted = $conn->query("SELECT id FROM events WHERE organizer_id IN ($id_list)");
+        $event_ids = [];
+        while ($event = $hosted->fetch_assoc()) {
+            $event_ids[] = (int) $event['id'];
+        }
+        foreach ($event_ids as $event_id) {
+            admin_delete_event_dependents($conn, $event_id);
+        }
+        $conn->query("DELETE FROM events WHERE organizer_id IN ($id_list)");
+
+        $user_deletes = [
+            'DELETE FROM participant WHERE user_id IN (' . $id_list . ')',
+            'DELETE FROM volunteers WHERE user_id IN (' . $id_list . ')',
+            'DELETE FROM attendees WHERE user_id IN (' . $id_list . ')',
+            'DELETE FROM favorites WHERE user_id IN (' . $id_list . ')',
+            'DELETE FROM event_editors WHERE user_id IN (' . $id_list . ')',
+            'DELETE FROM event_winners WHERE user_id IN (' . $id_list . ')',
+            'DELETE FROM event_certificates WHERE user_id IN (' . $id_list . ')',
+            'DELETE FROM event_pending_edits WHERE submitted_by_user_id IN (' . $id_list . ')',
+            'DELETE FROM login_otps WHERE user_id IN (' . $id_list . ')',
+            'DELETE FROM user_fcm_tokens WHERE user_id IN (' . $id_list . ')',
+            'DELETE FROM user_inbox_notifications WHERE user_id IN (' . $id_list . ')',
+            'DELETE FROM organizer_notifications WHERE organizer_id IN (' . $id_list . ')',
+            'DELETE FROM student_faculty WHERE user_id IN (' . $id_list . ')',
+        ];
+        foreach ($user_deletes as $sql) {
+            @$conn->query($sql);
+        }
+        @$conn->query("UPDATE event_review_files SET uploaded_by = NULL WHERE uploaded_by IN ($id_list)");
+        $deleted = $conn->query("DELETE FROM users WHERE id IN ($id_list)");
+        if (!$deleted) {
+            throw new Exception('Bulk user delete failed');
+        }
+        $conn->commit();
+        users_redirect('deleted', $view, $page, $filters);
+    } catch (Exception $e) {
+        $conn->rollback();
+        users_redirect('bulk_failed', $view, $page, $filters);
+    }
 }
 
 if (isset($_GET['id']) && isset($_GET['action']) && isset($_GET['type'])) {
     $id = intval($_GET['id']);
     $action = $_GET['action']; // 'block', 'unblock', or 'delete'
     $type = $_GET['type'];     // 'user', 'volunteer', or 'participant'
-    $view = isset($_GET['view']) ? (string) $_GET['view'] : '';
-
     if ($type == 'user' && $action == 'delete') {
         if ($id <= 0) {
-            users_redirect('delete_failed', $view);
+            users_redirect('delete_failed', $view, $page, $filters);
         }
 
         $check = $conn->prepare('SELECT id, is_student FROM users WHERE id = ? LIMIT 1');
@@ -67,7 +145,7 @@ if (isset($_GET['id']) && isset($_GET['action']) && isset($_GET['type'])) {
         $check->close();
 
         if (!$user) {
-            users_redirect('delete_failed', $view);
+            users_redirect('delete_failed', $view, $page, $filters);
         }
 
         // Keep the same Students/Faculty tab after delete when view was not passed
@@ -145,10 +223,10 @@ if (isset($_GET['id']) && isset($_GET['action']) && isset($_GET['type'])) {
             }
 
             $conn->commit();
-            users_redirect('deleted', $view);
+            users_redirect('deleted', $view, $page, $filters);
         } catch (Exception $e) {
             $conn->rollback();
-            users_redirect('delete_failed', $view);
+            users_redirect('delete_failed', $view, $page, $filters);
         }
 
     } elseif ($type == 'user' && ($action == 'block' || $action == 'unblock')) {
@@ -159,9 +237,9 @@ if (isset($_GET['id']) && isset($_GET['action']) && isset($_GET['type'])) {
         $stmt->bind_param("si", $new_status, $id);
 
         if ($stmt->execute()) {
-            users_redirect($msg, $view);
+            users_redirect($msg, $view, $page, $filters);
         }
-        header('Location: users.php' . (($view === 'students' || $view === 'faculty') ? '?view=' . urlencode($view) : ''));
+        users_redirect('update_failed', $view, $page, $filters);
         exit();
 
     } elseif ($type == 'volunteer' && ($action == 'block' || $action == 'unblock')) {

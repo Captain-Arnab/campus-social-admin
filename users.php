@@ -10,33 +10,43 @@ if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
 require_priv('manage_users');
 
 // Get view type (students or faculty)
-$view = isset($_GET['view']) ? $_GET['view'] : 'students';
+$view = (isset($_GET['view']) && $_GET['view'] === 'faculty') ? 'faculty' : 'students';
+$items_per_page = 20;
 
 // 1. AJAX HANDLER
 if (isset($_GET['ajax_filter'])) {
     $filter_sql = "";
-    $name = isset($_GET['name']) ? $_GET['name'] : '';
-    $email = isset($_GET['email']) ? $_GET['email'] : '';
-    $phone = isset($_GET['phone']) ? $_GET['phone'] : '';
-    $date = isset($_GET['date']) ? $_GET['date'] : '';
+    $name = trim(isset($_GET['name']) ? $_GET['name'] : '');
+    $email = trim(isset($_GET['email']) ? $_GET['email'] : '');
+    $phone = trim(isset($_GET['phone']) ? $_GET['phone'] : '');
+    $date = trim(isset($_GET['date']) ? $_GET['date'] : '');
+    $page = max(1, (int) ($_GET['page'] ?? 1));
     
     // Add student/faculty filter
     $user_type_filter = ($view == 'students') ? " AND is_student = 1" : " AND is_student = 0";
 
-    if (!empty($name)) $filter_sql .= " AND full_name LIKE '%$name%'";
-    if (!empty($email)) $filter_sql .= " AND email LIKE '%$email%'";
-    if (!empty($phone)) $filter_sql .= " AND phone LIKE '%$phone%'";
+    if (!empty($name)) $filter_sql .= " AND full_name LIKE '%" . $conn->real_escape_string($name) . "%'";
+    if (!empty($email)) $filter_sql .= " AND email LIKE '%" . $conn->real_escape_string($email) . "%'";
+    if (!empty($phone)) $filter_sql .= " AND phone LIKE '%" . $conn->real_escape_string($phone) . "%'";
     if (!empty($date)) {
         $dates = explode(" to ", $date);
         if(count($dates) == 2) {
-            $filter_sql .= " AND DATE(joined_at) BETWEEN '$dates[0]' AND '$dates[1]'";
+            $start_date = $conn->real_escape_string($dates[0]);
+            $end_date = $conn->real_escape_string($dates[1]);
+            $filter_sql .= " AND DATE(joined_at) BETWEEN '$start_date' AND '$end_date'";
         } else {
-            $filter_sql .= " AND DATE(joined_at) = '$dates[0]'";
+            $filter_sql .= " AND DATE(joined_at) = '" . $conn->real_escape_string($dates[0]) . "'";
         }
     }
 
-    $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter $filter_sql ORDER BY joined_at DESC");
+    $total_result = $conn->query("SELECT COUNT(*) AS total FROM users WHERE 1=1 $user_type_filter $filter_sql");
+    $total_users = (int) $total_result->fetch_assoc()['total'];
+    $total_pages = max(1, (int) ceil($total_users / $items_per_page));
+    $page = min($page, $total_pages);
+    $offset = ($page - 1) * $items_per_page;
+    $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter $filter_sql ORDER BY joined_at DESC, id DESC LIMIT $items_per_page OFFSET $offset");
 
+    ob_start();
     if ($users->num_rows > 0) {
         while($row = $users->fetch_assoc()) {
             $status_class = ($row['status'] == 'active') ? 'status-active' : 'status-blocked';
@@ -44,6 +54,7 @@ if (isset($_GET['ajax_filter'])) {
             $status_text = ucfirst($row['status']);
             ?>
             <tr class="user-row">
+                <td class="selection-cell"><input type="checkbox" class="user-select" value="<?php echo (int) $row['id']; ?>" aria-label="Select user"></td>
                 <td class="ps-4">
                     <div class="d-flex align-items-center">
                         <div class="avatar-circle me-3">
@@ -115,14 +126,47 @@ if (isset($_GET['ajax_filter'])) {
             <?php
         }
     } else {
-        echo '<tr><td colspan="6" class="text-center py-5 text-muted fw-light">No users found.</td></tr>';
+        echo '<tr><td colspan="7" class="text-center py-5 text-muted fw-light">No users found.</td></tr>';
     }
+    $rows_html = ob_get_clean();
+    header('Content-Type: application/json');
+    echo json_encode([
+        'html' => $rows_html,
+        'total' => $total_users,
+        'page' => $page,
+        'pages' => $total_pages
+    ]);
     exit;
 }
 
 // Initial query based on view
 $user_type_filter = ($view == 'students') ? " AND is_student = 1" : " AND is_student = 0";
-$users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY joined_at DESC");
+$name = trim(isset($_GET['name']) ? $_GET['name'] : '');
+$email = trim(isset($_GET['email']) ? $_GET['email'] : '');
+$phone = trim(isset($_GET['phone']) ? $_GET['phone'] : '');
+$date = trim(isset($_GET['date']) ? $_GET['date'] : '');
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$filter_sql = '';
+
+if ($name !== '') $filter_sql .= " AND full_name LIKE '%" . $conn->real_escape_string($name) . "%'";
+if ($email !== '') $filter_sql .= " AND email LIKE '%" . $conn->real_escape_string($email) . "%'";
+if ($phone !== '') $filter_sql .= " AND phone LIKE '%" . $conn->real_escape_string($phone) . "%'";
+if ($date !== '') {
+    $dates = explode(" to ", $date);
+    if (count($dates) === 2) {
+        $start_date = $conn->real_escape_string($dates[0]);
+        $end_date = $conn->real_escape_string($dates[1]);
+        $filter_sql .= " AND DATE(joined_at) BETWEEN '$start_date' AND '$end_date'";
+    } else {
+        $filter_sql .= " AND DATE(joined_at) = '" . $conn->real_escape_string($dates[0]) . "'";
+    }
+}
+
+$total_users = (int) $conn->query("SELECT COUNT(*) AS total FROM users WHERE 1=1 $user_type_filter $filter_sql")->fetch_assoc()['total'];
+$total_pages = max(1, (int) ceil($total_users / $items_per_page));
+$page = min($page, $total_pages);
+$offset = ($page - 1) * $items_per_page;
+$users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter $filter_sql ORDER BY joined_at DESC, id DESC LIMIT $items_per_page OFFSET $offset");
 ?>
 
 <!DOCTYPE html>
@@ -219,6 +263,17 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
         .user-link { text-decoration: none; transition: 0.2s; }
         .user-link:hover { color: var(--brand-color) !important; }
         .small-icon { width: 15px; text-align: center; }
+        .pagination-controls { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+        .pagination-controls button { min-width: 38px; height: 38px; border: 1px solid #e9ecef; border-radius: 10px; background: white; color: var(--text-muted); font-weight: 600; }
+        .pagination-controls button:hover:not(:disabled), .pagination-controls button.active { background: var(--brand-color); border-color: var(--brand-color); color: white; }
+        .pagination-controls button:disabled { opacity: 0.45; cursor: not-allowed; }
+        .pagination-ellipsis { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 38px; color: var(--text-muted); }
+        .bulk-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+        .bulk-toolbar select, .bulk-toolbar button { height: 40px; border: 1px solid #e9ecef; border-radius: 10px; padding: 0 12px; background: white; color: var(--text-muted); font-weight: 600; }
+        .bulk-toolbar button { background: var(--brand-color); border-color: var(--brand-color); color: white; }
+        .bulk-toolbar button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .selection-cell { width: 42px; padding-left: 12px !important; padding-right: 0 !important; text-align: center; }
+        .user-select, #selectAllUsers { width: 16px; height: 16px; accent-color: var(--brand-color); }
     </style>
 </head>
 <body>
@@ -230,7 +285,7 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
                 <h4 class="m-0 text-dark">User Administration</h4>
                 <p class="text-muted small m-0 mt-1">Manage platform participants and moderation</p>
             </div>
-            <span class="count-badge align-self-start align-self-sm-center flex-shrink-0" id="userCount"><?php echo $users->num_rows; ?> Users</span>
+            <span class="count-badge align-self-start align-self-sm-center flex-shrink-0" id="userCount"><?php echo $total_users; ?> Users</span>
         </div>
 
         <!-- View Tabs -->
@@ -247,25 +302,25 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
             <div class="row g-4 align-items-center">
                 <div class="col-12 col-md-6 col-lg-3">
                     <div class="mui-form-group">
-                        <input type="text" id="nameInput" class="mui-input" placeholder=" ">
+                        <input type="text" id="nameInput" class="mui-input" placeholder=" " value="<?php echo htmlspecialchars($name, ENT_QUOTES, 'UTF-8'); ?>">
                         <label class="mui-label">Search Name</label>
                     </div>
                 </div>
                 <div class="col-12 col-md-6 col-lg-3">
                     <div class="mui-form-group">
-                        <input type="text" id="emailInput" class="mui-input" placeholder=" ">
+                        <input type="text" id="emailInput" class="mui-input" placeholder=" " value="<?php echo htmlspecialchars($email, ENT_QUOTES, 'UTF-8'); ?>">
                         <label class="mui-label">Search Email</label>
                     </div>
                 </div>
                 <div class="col-12 col-md-6 col-lg-2">
                     <div class="mui-form-group">
-                        <input type="text" id="phoneInput" class="mui-input" placeholder=" ">
+                        <input type="text" id="phoneInput" class="mui-input" placeholder=" " value="<?php echo htmlspecialchars($phone, ENT_QUOTES, 'UTF-8'); ?>">
                         <label class="mui-label">Search Phone</label>
                     </div>
                 </div>
                 <div class="col-12 col-md-6 col-lg-2">
                     <div class="mui-form-group">
-                        <input type="text" id="dateInput" class="mui-input bg-white" placeholder=" ">
+                        <input type="text" id="dateInput" class="mui-input bg-white" placeholder=" " value="<?php echo htmlspecialchars($date, ENT_QUOTES, 'UTF-8'); ?>">
                         <label class="mui-label">Joined Date</label>
                     </div>
                 </div>
@@ -276,10 +331,24 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
             </div>
         </div>
 
+        <div class="bulk-toolbar">
+            <span class="small text-muted" id="selectionSummary">0 users selected</span>
+            <div class="d-flex gap-2">
+                <select id="bulkAction" aria-label="Bulk user action">
+                    <option value="">Bulk edit status...</option>
+                    <option value="block">Block selected</option>
+                    <option value="unblock">Unblock selected</option>
+                    <option value="delete">Delete selected</option>
+                </select>
+                <button type="button" id="applyBulkAction" disabled>Apply</button>
+            </div>
+        </div>
+
         <div class="table-responsive">
             <table class="table custom-table mb-0 text-nowrap">
                 <thead>
                     <tr>
+                        <th class="selection-cell"><input type="checkbox" id="selectAllUsers" aria-label="Select all users on this page"></th>
                         <th>User Profile</th>
                         <th>Contact Info</th>
                         <th><?php echo ($view == 'students') ? 'Roll Number' : 'Employee ID'; ?></th>
@@ -296,6 +365,7 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
                             $status_text = ucfirst($row['status']);
                         ?>
                         <tr class="user-row">
+                            <td class="selection-cell"><input type="checkbox" class="user-select" value="<?php echo (int) $row['id']; ?>" aria-label="Select user"></td>
                             <td class="ps-4">
                                 <div class="d-flex align-items-center">
                                     <div class="avatar-circle me-3">
@@ -359,6 +429,7 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
                 </tbody>
             </table>
         </div>
+        <nav class="pagination-controls mt-3" aria-label="Users pagination" id="paginationControls"></nav>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -380,6 +451,8 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
                 Swal.fire('User deleted', 'The user account and related records have been removed.', 'success').then(clearMsg);
             } else if (msg === 'delete_failed') {
                 Swal.fire('Delete failed', 'Could not delete this user. Please try again.', 'error').then(clearMsg);
+            } else if (msg === 'bulk_failed') {
+                Swal.fire('Bulk action failed', 'Could not update all selected users. Please try again.', 'error').then(clearMsg);
             }
         })();
 
@@ -390,21 +463,120 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
         const phoneIn = document.getElementById('phoneInput');
         const dateIn = document.getElementById('dateInput');
         const tableBody = document.getElementById('usersTableBody');
+        const paginationControls = document.getElementById('paginationControls');
+        const selectAllUsers = document.getElementById('selectAllUsers');
+        const bulkAction = document.getElementById('bulkAction');
+        const applyBulkAction = document.getElementById('applyBulkAction');
+        const selectionSummary = document.getElementById('selectionSummary');
+        let currentPage = <?php echo $page; ?>;
+        let requestSequence = 0;
 
-        function fetchUsers() {
-            const url = `users.php?ajax_filter=1&view=${currentView}&name=${encodeURIComponent(nameIn.value)}&email=${encodeURIComponent(emailIn.value)}&phone=${encodeURIComponent(phoneIn.value)}&date=${encodeURIComponent(dateIn.value)}`;
-            fetch(url).then(res => res.text()).then(data => tableBody.innerHTML = data);
+        function selectedUserIds() {
+            return [...tableBody.querySelectorAll('.user-select:checked')].map(input => input.value);
         }
 
+        function updateBulkState() {
+            const selectedCount = selectedUserIds().length;
+            selectionSummary.textContent = `${selectedCount} user${selectedCount === 1 ? '' : 's'} selected`;
+            applyBulkAction.disabled = selectedCount === 0 || bulkAction.value === '';
+            if (selectAllUsers) {
+                const checkboxes = tableBody.querySelectorAll('.user-select');
+                selectAllUsers.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
+                selectAllUsers.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+            }
+        }
+
+        selectAllUsers.addEventListener('change', () => {
+            tableBody.querySelectorAll('.user-select').forEach(input => {
+                input.checked = selectAllUsers.checked;
+            });
+            updateBulkState();
+        });
+        tableBody.addEventListener('change', event => {
+            if (event.target.classList.contains('user-select')) updateBulkState();
+        });
+        bulkAction.addEventListener('change', updateBulkState);
+
+        function renderPagination(total, page, pages) {
+            paginationControls.innerHTML = '';
+            if (total === 0 || pages <= 1) return;
+
+            const addButton = (label, targetPage, disabled = false, active = false) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.textContent = label;
+                button.disabled = disabled;
+                button.className = active ? 'active' : '';
+                button.setAttribute('aria-label', `Page ${targetPage}`);
+                button.addEventListener('click', () => fetchUsers(targetPage));
+                paginationControls.appendChild(button);
+            };
+
+            addButton('Previous', page - 1, page === 1);
+            const visiblePages = [...new Set([1, page - 2, page - 1, page, page + 1, page + 2, pages])]
+                .filter(pageNumber => pageNumber >= 1 && pageNumber <= pages)
+                .sort((firstPage, secondPage) => firstPage - secondPage);
+            let previousPage = null;
+            visiblePages.forEach(pageNumber => {
+                if (previousPage !== null && pageNumber - previousPage > 1) {
+                    const ellipsis = document.createElement('span');
+                    ellipsis.className = 'pagination-ellipsis';
+                    ellipsis.textContent = '...';
+                    paginationControls.appendChild(ellipsis);
+                }
+                addButton(String(pageNumber), pageNumber, false, pageNumber === page);
+                previousPage = pageNumber;
+            });
+            addButton('Next', page + 1, page === pages);
+        }
+
+        function fetchUsers(page = 1) {
+            currentPage = page;
+            const pageParams = new URLSearchParams(window.location.search);
+            pageParams.set('view', currentView);
+            pageParams.set('page', page);
+            [['name', nameIn.value], ['email', emailIn.value], ['phone', phoneIn.value], ['date', dateIn.value]].forEach(([key, value]) => {
+                if (value) pageParams.set(key, value);
+                else pageParams.delete(key);
+            });
+            window.history.replaceState({}, '', `users.php?${pageParams.toString()}`);
+            const sequence = ++requestSequence;
+            const url = `users.php?ajax_filter=1&view=${currentView}&page=${page}&name=${encodeURIComponent(nameIn.value)}&email=${encodeURIComponent(emailIn.value)}&phone=${encodeURIComponent(phoneIn.value)}&date=${encodeURIComponent(dateIn.value)}`;
+            tableBody.setAttribute('aria-busy', 'true');
+            fetch(url)
+                .then(res => {
+                    if (!res.ok) throw new Error('Could not load users');
+                    return res.json();
+                })
+                .then(data => {
+                    if (sequence !== requestSequence) return;
+                    tableBody.innerHTML = data.html;
+                    currentPage = data.page;
+                    document.getElementById('userCount').textContent = `${data.total} Users`;
+                    renderPagination(data.total, data.page, data.pages);
+                    selectAllUsers.checked = false;
+                    selectAllUsers.indeterminate = false;
+                    updateBulkState();
+                })
+                .catch(() => {
+                    if (sequence === requestSequence) {
+                        tableBody.innerHTML = '<tr><td colspan="6" class="text-center py-5 text-danger">Could not load users.</td></tr>';
+                    }
+                })
+                .finally(() => tableBody.removeAttribute('aria-busy'));
+        }
+
+        renderPagination(<?php echo $total_users; ?>, <?php echo $page; ?>, <?php echo $total_pages; ?>);
+
         document.getElementById('resetBtn').addEventListener('click', () => {
-            nameIn.value = ''; emailIn.value = ''; phoneIn.value = ''; fp.clear(); fetchUsers();
+            nameIn.value = ''; emailIn.value = ''; phoneIn.value = ''; fp.clear(); fetchUsers(1);
         });
 
         let timeout = null;
-        function debounceFetch() { clearTimeout(timeout); timeout = setTimeout(fetchUsers, 300); }
+        function debounceFetch() { clearTimeout(timeout); timeout = setTimeout(() => fetchUsers(1), 300); }
 
         [nameIn, emailIn, phoneIn].forEach(el => el.addEventListener('input', debounceFetch));
-        dateIn.addEventListener('change', fetchUsers);
+        dateIn.addEventListener('change', () => fetchUsers(1));
 
         function toggleUser(id, action) {
             Swal.fire({
@@ -412,7 +584,7 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
                 showCancelButton: true, confirmButtonColor: '#FF5F15'
             }).then((res) => {
                 if (res.isConfirmed) {
-                    window.location.href = `manage_user.php?id=${id}&action=${action}&type=user&view=${encodeURIComponent(currentView)}`;
+                    window.location.href = buildUserActionUrl(id, action);
                 }
             });
         }
@@ -428,10 +600,54 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter ORDER BY 
                 cancelButtonText: 'Cancel'
             }).then((res) => {
                 if (res.isConfirmed) {
-                    window.location.href = `manage_user.php?id=${id}&action=delete&type=user&view=${encodeURIComponent(currentView)}`;
+                    window.location.href = buildUserActionUrl(id, 'delete');
                 }
             });
         }
+
+        function buildUserActionUrl(id, action) {
+            const params = new URLSearchParams({
+                id: id,
+                action: action,
+                type: 'user',
+                view: currentView,
+                page: currentPage,
+                name: nameIn.value,
+                email: emailIn.value,
+                phone: phoneIn.value,
+                date: dateIn.value
+            });
+            return `manage_user.php?${params.toString()}`;
+        }
+
+        applyBulkAction.addEventListener('click', () => {
+            const ids = selectedUserIds();
+            const action = bulkAction.value;
+            if (!ids.length || !action) return;
+            const isDelete = action === 'delete';
+            Swal.fire({
+                title: isDelete ? 'Delete selected users?' : `${action === 'block' ? 'Block' : 'Unblock'} selected users?`,
+                text: `${ids.length} user${ids.length === 1 ? '' : 's'} will be affected.`,
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: isDelete ? '#c0392b' : '#FF5F15',
+                confirmButtonText: isDelete ? 'Yes, delete' : 'Apply'
+            }).then(result => {
+                if (!result.isConfirmed) return;
+                const params = new URLSearchParams({
+                    action: `bulk_${action}`,
+                    type: 'user',
+                    view: currentView,
+                    page: currentPage,
+                    name: nameIn.value,
+                    email: emailIn.value,
+                    phone: phoneIn.value,
+                    date: dateIn.value,
+                    ids: ids.join(',')
+                });
+                window.location.href = `manage_user.php?${params.toString()}`;
+            });
+        });
     </script>
 </body>
 </html>
