@@ -55,7 +55,11 @@ if ($method == 'POST') {
             $roll_number = $conn->real_escape_string(trim((string) $data['roll_number']));
             $check_roll = $conn->query("SELECT id FROM student_faculty WHERE roll_number = '$roll_number'");
             if ($check_roll->num_rows > 0) {
-                echo json_encode(["status" => "error", "message" => "Roll number already registered"]);
+                echo json_encode([
+                    "status" => "error",
+                    "message" => "This roll number is already registered. Please use another roll number.",
+                    "field" => "roll_number"
+                ]);
                 exit();
             }
         } else {
@@ -68,7 +72,11 @@ if ($method == 'POST') {
             $emp_number = $conn->real_escape_string(trim((string) $data['emp_number']));
             $check_emp = $conn->query("SELECT id FROM student_faculty WHERE emp_number = '$emp_number' AND emp_number != 'NA'");
             if ($check_emp->num_rows > 0) {
-                echo json_encode(["status" => "error", "message" => "Employee ID already registered"]);
+                echo json_encode([
+                    "status" => "error",
+                    "message" => "This employee ID is already registered. Please use another employee ID.",
+                    "field" => "employee_id"
+                ]);
                 exit();
             }
         }
@@ -89,10 +97,23 @@ if ($method == 'POST') {
             ? $conn->real_escape_string($data['profile_pic']) 
             : 'default_avatar.png';
 
-        // Check if email or phone already exists (email stored lowercase on insert — index-friendly)
-        $check = $conn->query("SELECT id FROM users WHERE email = '$email' OR phone = '$phone' LIMIT 1");
-        if ($check->num_rows > 0) {
-            echo json_encode(["status" => "error", "message" => "Email or Phone already registered"]);
+        // Check unique fields individually before insert (first match wins)
+        $check_email = $conn->query("SELECT id FROM users WHERE email = '$email' LIMIT 1");
+        if ($check_email && $check_email->num_rows > 0) {
+            echo json_encode([
+                "status" => "error",
+                "message" => "This email is already registered. Please use another email.",
+                "field" => "email"
+            ]);
+            exit();
+        }
+        $check_phone = $conn->query("SELECT id FROM users WHERE phone = '$phone' LIMIT 1");
+        if ($check_phone && $check_phone->num_rows > 0) {
+            echo json_encode([
+                "status" => "error",
+                "message" => "This mobile number is already registered. Please use another mobile number.",
+                "field" => "mobile_number"
+            ]);
             exit();
         }
 
@@ -325,8 +346,11 @@ if ($method == 'POST') {
                 exit();
             }
 
+            // Wrong identifier / contact / password all use the same message (no account enumeration)
+            $wrong_creds = ["status" => "error", "message" => "Please enter correct login credentials."];
+
             if ($sf_result->num_rows == 0) {
-                echo json_encode(["status" => "error", "message" => "Invalid " . ($is_student ? "roll number" : "employee ID")]);
+                echo json_encode($wrong_creds);
                 exit();
             }
 
@@ -339,21 +363,21 @@ if ($method == 'POST') {
                 exit();
             }
             if ($user_res->num_rows == 0) {
-                echo json_encode(["status" => "error", "message" => "User not found"]);
+                echo json_encode($wrong_creds);
                 exit();
             }
             $user = $user_res->fetch_assoc();
 
             if ($by_mobile) {
                 if (!sms_phones_match_loose($contact_raw, $user['phone'])) {
-                    echo json_encode(["status" => "error", "message" => "Phone number not found or doesn't match"]);
+                    echo json_encode($wrong_creds);
                     exit();
                 }
             } else {
                 $want = strtolower($contact_raw);
                 $have = strtolower(trim((string) $user['email']));
                 if ($want !== $have) {
-                    echo json_encode(["status" => "error", "message" => "Email not found or doesn't match"]);
+                    echo json_encode($wrong_creds);
                     exit();
                 }
             }
@@ -436,7 +460,7 @@ if ($method == 'POST') {
             if (portal_verify_password($user['password'], $password)) {
                 echo json_encode($issue_token());
             } else {
-                echo json_encode(["status" => "error", "message" => "Invalid password"]);
+                echo json_encode($wrong_creds);
             }
             exit();
         } catch (Throwable $e) {
