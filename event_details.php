@@ -249,7 +249,15 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                             <div class="col-12">
                                 <small class="text-muted fw-bold text-uppercase d-block mb-1" style="font-size: 0.6rem;">Hold Reason</small>
                                 <div class="alert alert-warning mb-0">
-                                    <i class="fas fa-info-circle me-2"></i><?php echo $event['hold_reason']; ?>
+                                    <i class="fas fa-info-circle me-2"></i><?php echo htmlspecialchars($event['hold_reason']); ?>
+                                </div>
+                            </div>
+                            <?php endif; ?>
+                            <?php if (($event['status'] ?? '') === 'rejected' && !empty($event['rejection_reason'])): ?>
+                            <div class="col-12">
+                                <small class="text-muted fw-bold text-uppercase d-block mb-1" style="font-size: 0.6rem;">Rejection Reason</small>
+                                <div class="alert alert-danger mb-0">
+                                    <i class="fas fa-times-circle me-2"></i><?php echo htmlspecialchars($event['rejection_reason']); ?>
                                 </div>
                             </div>
                             <?php endif; ?>
@@ -569,7 +577,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                             <i class="fas fa-pause-circle me-2"></i>PUT ON HOLD
                         </button>
                         
-                        <button onclick="processAction('reject')" class="btn btn-action-main btn-link text-danger text-decoration-none">
+                        <button onclick="showRejectModal()" class="btn btn-action-main btn-link text-danger text-decoration-none">
                             <i class="fas fa-times-circle me-2"></i>REJECT REQUEST
                         </button>
 
@@ -590,7 +598,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                             <i class="fas fa-calendar-check me-2"></i>RESCHEDULE EVENT
                         </button>
                         
-                        <button onclick="processAction('reject')" class="btn btn-action-main btn-link text-danger text-decoration-none">
+                        <button onclick="showRejectModal()" class="btn btn-action-main btn-link text-danger text-decoration-none">
                             <i class="fas fa-times-circle me-2"></i>REJECT REQUEST
                         </button>
 
@@ -802,17 +810,51 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
         }
 
         function processAction(action) {
-            const labels = { approve: 'Approve this event', reject: 'Reject this event' };
+            if (action === 'reject') {
+                showRejectModal();
+                return;
+            }
+            const labels = { approve: 'Approve this event' };
             const text = labels[action] || 'Continue?';
             Swal.fire({
                 title: 'Confirm',
                 text: text,
-                icon: action === 'reject' ? 'warning' : 'question',
+                icon: 'question',
                 showCancelButton: true,
-                confirmButtonColor: action === 'reject' ? '#e74c3c' : '#2ecc71',
+                confirmButtonColor: '#2ecc71',
                 cancelButtonColor: '#95a5a6'
             }).then((res) => {
                 if (res.isConfirmed) window.location.href = `approve.php?id=<?php echo $id; ?>&action=${action}`;
+            });
+        }
+
+        function showRejectModal() {
+            Swal.fire({
+                title: 'Reject Event',
+                html: `
+                    <div class="text-start">
+                        <p class="small text-muted mb-2">The organizer who published this event will see your reason in the app.</p>
+                        <label class="form-label small fw-bold">Rejection reason <span class="text-danger">*</span></label>
+                        <textarea id="rejectReason" class="form-control" rows="4" maxlength="2000" placeholder="Explain why this event is being rejected..."></textarea>
+                    </div>
+                `,
+                showCancelButton: true,
+                confirmButtonText: 'Reject Event',
+                confirmButtonColor: '#e74c3c',
+                cancelButtonColor: '#95a5a6',
+                preConfirm: () => {
+                    const reason = (document.getElementById('rejectReason').value || '').trim();
+                    if (!reason) {
+                        Swal.showValidationMessage('Please provide a rejection reason');
+                        return false;
+                    }
+                    return { reason };
+                }
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    const data = result.value;
+                    window.location.href = `approve.php?id=<?php echo $id; ?>&action=reject&reason=${encodeURIComponent(data.reason)}`;
+                }
             });
         }
 

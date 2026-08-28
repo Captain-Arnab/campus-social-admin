@@ -261,7 +261,8 @@ function campus_inbox_after_admin_approve_or_reject(
     int $event_id,
     string $action,
     int $organizer_id,
-    string $event_title_plain
+    string $event_title_plain,
+    string $admin_note_plain = ''
 ): void {
     if ($organizer_id <= 0) {
         return;
@@ -273,8 +274,17 @@ function campus_inbox_after_admin_approve_or_reject(
     $body      = $isApprove
         ? ('Your event "' . $event_title_plain . '" is approved and published.')
         : ('Your event "' . $event_title_plain . '" was rejected by admin.');
+    if (!$isApprove && $admin_note_plain !== '') {
+        $body .= ' Reason: ' . $admin_note_plain;
+    }
 
-    campus_inbox_deliver_to_organizer($conn, $organizer_id, $event_id, $type, $title, $body, []);
+    $extra = [];
+    if (!$isApprove && $admin_note_plain !== '') {
+        $extra['rejection_reason'] = $admin_note_plain;
+        $extra['admin_note'] = $admin_note_plain;
+    }
+
+    campus_inbox_deliver_to_organizer($conn, $organizer_id, $event_id, $type, $title, $body, $extra);
 }
 
 /**
@@ -447,7 +457,9 @@ function campus_inbox_after_status_change($conn, $event_id, $new_status, $old_st
             $notif_type = 'event_rejected';
             $title      = 'Event Rejected';
             $body       = "Your event \"{$event_title}\" has been rejected.";
-            if ($admin_note !== '') $body .= " Reason: {$admin_note}";
+            if ($admin_note !== '') {
+                $body .= " Reason: {$admin_note}";
+            }
             break;
         case 'hold':
             $notif_type = 'event_hold';
@@ -468,11 +480,18 @@ function campus_inbox_after_status_change($conn, $event_id, $new_status, $old_st
             break;
     }
 
-    $data_json = json_encode([
+    $data_payload = [
         'event_id'   => $event_id,
         'old_status' => $old_status,
         'new_status' => $new_status,
-    ]);
+    ];
+    if ($admin_note !== '') {
+        $data_payload['admin_note'] = $admin_note;
+        if (strtolower((string) $new_status) === 'rejected') {
+            $data_payload['rejection_reason'] = $admin_note;
+        }
+    }
+    $data_json = json_encode($data_payload);
 
     $ins = $conn->prepare(
         'INSERT INTO user_inbox_notifications (user_id, notification_type, title, body, event_id, data_json, is_read, created_at)

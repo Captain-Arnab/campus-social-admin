@@ -316,7 +316,7 @@ $app_users_count = $app_users_count_row ? (int) $app_users_count_row->fetch_asso
             }
             const messages = {
                 approve: { title: 'Event approved', text: 'The event has been approved and is now live.', icon: 'success' },
-                reject: { title: 'Event rejected', text: 'The event has been rejected.', icon: 'info' },
+                reject: { title: 'Event rejected', text: 'The event was rejected and the organizer was notified with your reason.', icon: 'info' },
                 hold: { title: 'Event on hold', text: 'The event has been put on hold.', icon: 'warning' },
                 reschedule: { title: 'Event rescheduled', text: 'The event has been rescheduled.', icon: 'success' },
                 error: { title: 'Error', text: 'Something went wrong. Please try again.', icon: 'error' },

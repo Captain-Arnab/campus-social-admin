@@ -28,6 +28,7 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
     $remarks = '';
     $reschedule_date = NULL;
     $hold_reason = NULL;
+    $rejection_reason = NULL;
     $new_event_date = NULL;
 
     switch($action) {
@@ -38,7 +39,17 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
             
         case 'reject':
             $new_status = 'rejected';
-            $remarks = 'Event rejected';
+            $rejection_reason = isset($_GET['reason']) ? trim((string) $_GET['reason']) : '';
+            if ($rejection_reason === '') {
+                $rejection_reason = 'No reason provided';
+            }
+            // Cap length so junk query strings cannot bloat the row
+            if (function_exists('mb_substr')) {
+                $rejection_reason = mb_substr($rejection_reason, 0, 2000, 'UTF-8');
+            } else {
+                $rejection_reason = substr($rejection_reason, 0, 2000);
+            }
+            $remarks = 'Event rejected: ' . $rejection_reason;
             break;
             
         case 'hold':
@@ -59,8 +70,8 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
 
     // Update event status
     if ($action == 'hold') {
-        // Update with hold reason and reschedule date
-        $stmt = $conn->prepare("UPDATE events SET status=?, hold_reason=?, reschedule_date=? WHERE id=?");
+        // Update with hold reason and reschedule date; clear any prior rejection note
+        $stmt = $conn->prepare("UPDATE events SET status=?, hold_reason=?, reschedule_date=?, rejection_reason=NULL WHERE id=?");
         $stmt->bind_param("sssi", $new_status, $hold_reason, $reschedule_date, $id);
     } elseif ($action == 'reschedule') {
         // Update start date; clear optional end (admin reschedule does not carry over old span)
@@ -71,11 +82,16 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
             $stmt = $conn->prepare('UPDATE events SET event_date = ? WHERE id = ?');
         }
         $stmt->bind_param('si', $new_event_date, $id);
+    } elseif ($action == 'reject') {
+        $empty_date = NULL;
+        $empty_hold = NULL;
+        $stmt = $conn->prepare("UPDATE events SET status=?, hold_reason=?, reschedule_date=?, rejection_reason=? WHERE id=?");
+        $stmt->bind_param("ssssi", $new_status, $empty_hold, $empty_date, $rejection_reason, $id);
     } else {
-        // Clear hold fields when approving/rejecting
+        // Clear hold + rejection fields when approving
         $empty_date = NULL;
         $empty_reason = NULL;
-        $stmt = $conn->prepare("UPDATE events SET status=?, hold_reason=?, reschedule_date=? WHERE id=?");
+        $stmt = $conn->prepare("UPDATE events SET status=?, hold_reason=?, reschedule_date=?, rejection_reason=NULL WHERE id=?");
         $stmt->bind_param("sssi", $new_status, $empty_reason, $empty_date, $id);
     }
 
@@ -90,6 +106,8 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
             $admin_note_text = '';
             if ($action === 'hold' && isset($hold_reason)) {
                 $admin_note_text = (string) $hold_reason;
+            } elseif ($action === 'reject' && isset($rejection_reason)) {
+                $admin_note_text = (string) $rejection_reason;
             } elseif ($action === 'reschedule' && isset($reschedule_reason)) {
                 $admin_note_text = (string) $reschedule_reason;
             }
