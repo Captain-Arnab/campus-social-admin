@@ -22,6 +22,42 @@ function events_api_time_mark(string $label, float &$last, float $t0, ?array &$b
     $last = $now;
 }
 
+function events_api_upload_error_message(int $code): string
+{
+    switch ($code) {
+        case UPLOAD_ERR_INI_SIZE:
+        case UPLOAD_ERR_FORM_SIZE:
+            return 'Banner file exceeds upload size limit';
+        case UPLOAD_ERR_PARTIAL:
+            return 'Banner upload was interrupted; please try again';
+        case UPLOAD_ERR_NO_FILE:
+            return 'No banner file received';
+        case UPLOAD_ERR_NO_TMP_DIR:
+            return 'Server upload directory is not configured';
+        case UPLOAD_ERR_CANT_WRITE:
+            return 'Server could not save the uploaded banner';
+        case UPLOAD_ERR_EXTENSION:
+            return 'Banner upload blocked by server extension';
+        default:
+            return 'Banner upload failed (error code ' . $code . ')';
+    }
+}
+
+/**
+ * @return array{status:string,message:string,field?:string,detail?:string}
+ */
+function events_api_create_error(string $message, string $field = '', string $detail = ''): array
+{
+    $out = ['status' => 'error', 'message' => $message];
+    if ($field !== '') {
+        $out['field'] = $field;
+    }
+    if ($detail !== '') {
+        $out['detail'] = $detail;
+    }
+    return $out;
+}
+
 /** Public web base for deep links / share sheet (override with MICAMPUS_PUBLIC_BASE). */
 function events_api_public_base(): string
 {
@@ -506,29 +542,74 @@ elseif ($method == 'POST') {
     }
 
     // --- CREATE EVENT (Host / Publish from Flutter) ---
-    // Slow work (admin SMS + inbox fan-out + per-token FCM) is queued for cron.
+    // POST multipart/form-data to events.php (no action param). Slow notify work is queued.
     $t0 = microtime(true);
     $tMark = $t0;
     $timings = [];
     $debugTiming = !empty($_POST['debug_timing']) || (isset($_GET['debug_timing']) && $_GET['debug_timing']);
 
-    if (!isset($_POST['title']) || !isset($_POST['user_id'])) {
-        echo json_encode(["status" => "error", "message" => "Event-er proyojonio details dewa hoyni"]);
+    $missing = [];
+    if (!isset($_POST['title']) || trim((string) $_POST['title']) === '') {
+        $missing[] = 'title';
+    }
+    if (!isset($_POST['user_id']) || trim((string) $_POST['user_id']) === '') {
+        $missing[] = 'user_id';
+    }
+    if ($missing !== []) {
+        echo json_encode(events_api_create_error(
+            'Missing required field(s): ' . implode(', ', $missing),
+            $missing[0]
+        ));
         exit();
     }
 
-    $title_plain = isset($_POST['title']) ? trim((string) $_POST['title']) : '';
+    $title_plain = trim((string) $_POST['title']);
     $cat_plain   = isset($_POST['category']) ? trim((string) $_POST['category']) : '';
     $venue_plain = isset($_POST['venue']) ? trim((string) $_POST['venue']) : '';
 
+    if ($cat_plain === '') {
+        echo json_encode(events_api_create_error('Category is required', 'category'));
+        exit();
+    }
+    if ($venue_plain === '') {
+        echo json_encode(events_api_create_error('Venue is required', 'venue'));
+        exit();
+    }
+    if (strlen($title_plain) > 100) {
+        echo json_encode(events_api_create_error('Title must be 100 characters or fewer', 'title'));
+        exit();
+    }
+    if (strlen($cat_plain) > 50) {
+        echo json_encode(events_api_create_error('Category must be 50 characters or fewer', 'category'));
+        exit();
+    }
+    if (strlen($venue_plain) > 255) {
+        echo json_encode(events_api_create_error('Venue must be 255 characters or fewer', 'venue'));
+        exit();
+    }
+
     $start_raw = events_parse_start_from_request($_POST, 'event_date');
     if ($start_raw === null) {
-        echo json_encode(["status" => "error", "message" => "Event start date/time is required (event_date or event_date_from)"]);
+        echo json_encode(events_api_create_error(
+            'Event start date/time is required (event_date, event_date_from, or event_start_date)',
+            'event_date'
+        ));
+        exit();
+    }
+    if (strtotime($start_raw) === false) {
+        echo json_encode(events_api_create_error('Invalid event start date/time format', 'event_date', $start_raw));
         exit();
     }
     $end_raw = events_parse_end_from_request($_POST);
+    if ($end_raw !== null && $end_raw !== '' && strtotime($end_raw) === false) {
+        echo json_encode(events_api_create_error('Invalid event end date/time format', 'event_end_date', $end_raw));
+        exit();
+    }
     if (!events_validate_end_after_start($start_raw, $end_raw)) {
-        echo json_encode(["status" => "error", "message" => "Event end date/time must be on or after the start"]);
+        echo json_encode(events_api_create_error(
+            'Event end date/time must be on or after the start date/time',
+            'event_end_date'
+        ));
         exit();
     }
     events_api_time_mark('validate_input', $tMark, $t0, $timings);
@@ -540,6 +621,25 @@ elseif ($method == 'POST') {
     $venue = $conn->real_escape_string($venue_plain);
     $rules = $conn->real_escape_string($_POST['rules'] ?? '');
     $organizer_id = intval($_POST['user_id']);
+    if ($organizer_id <= 0) {
+        echo json_encode(events_api_create_error('user_id must be a positive integer', 'user_id'));
+        exit();
+    }
+
+    $orgStmt = $conn->prepare('SELECT id FROM users WHERE id = ? LIMIT 1');
+    if (!$orgStmt) {
+        error_log('[events.php CREATE] organizer prepare failed: ' . $conn->error);
+        echo json_encode(events_api_create_error('Database error while validating organizer', 'user_id', $conn->error));
+        exit();
+    }
+    $orgStmt->bind_param('i', $organizer_id);
+    $orgStmt->execute();
+    $orgFound = $orgStmt->get_result()->num_rows > 0;
+    $orgStmt->close();
+    if (!$orgFound) {
+        echo json_encode(events_api_create_error('Organizer user_id does not exist', 'user_id'));
+        exit();
+    }
 
     // Banner handling:
     // PHP must consume $_FILES in this request (tmp files are deleted when the script ends).
@@ -550,16 +650,30 @@ elseif ($method == 'POST') {
     $deferBanners = !empty($_POST['defer_banners']);
     $image_paths = [];
     $staged_files = [];
+    $banner_errors = [];
     $uploadRoot = __DIR__ . '/../uploads/events';
     $stagingDir = $uploadRoot . '/_staging';
 
-    if (isset($_FILES['banners']) && !empty($_FILES['banners']['tmp_name'][0])) {
+    if (isset($_FILES['banners']) && is_array($_FILES['banners']['tmp_name'])) {
         $targetDir = $deferBanners ? $stagingDir : $uploadRoot;
-        if (!is_dir($targetDir)) {
-            mkdir($targetDir, 0777, true);
+        if (!is_dir($targetDir) && !mkdir($targetDir, 0777, true) && !is_dir($targetDir)) {
+            error_log('[events.php CREATE] cannot create upload dir: ' . $targetDir);
+            echo json_encode(events_api_create_error(
+                'Server upload directory is not writable',
+                'banners',
+                $targetDir
+            ));
+            exit();
         }
         foreach ($_FILES['banners']['tmp_name'] as $key => $tmp_name) {
-            if ($_FILES['banners']['error'][$key] !== UPLOAD_ERR_OK || $tmp_name === '') {
+            $uploadErr = (int) ($_FILES['banners']['error'][$key] ?? UPLOAD_ERR_NO_FILE);
+            if ($uploadErr === UPLOAD_ERR_NO_FILE && ($tmp_name === '' || $tmp_name === null)) {
+                continue;
+            }
+            if ($uploadErr !== UPLOAD_ERR_OK) {
+                $msg = events_api_upload_error_message($uploadErr);
+                $banner_errors[] = $msg;
+                error_log('[events.php CREATE] banner upload error key=' . $key . ' ' . $msg);
                 continue;
             }
             $safeBase = preg_replace('/[^A-Za-z0-9._-]/', '_', basename((string) $_FILES['banners']['name'][$key]));
@@ -570,6 +684,10 @@ elseif ($method == 'POST') {
                 } else {
                     $image_paths[] = $filename;
                 }
+            } else {
+                $msg = 'Could not save banner file: ' . basename((string) $_FILES['banners']['name'][$key]);
+                $banner_errors[] = $msg;
+                error_log('[events.php CREATE] move_uploaded_file failed for ' . $filename);
             }
         }
     }
@@ -592,70 +710,86 @@ elseif ($method == 'POST') {
             VALUES ('$title', '$desc', '$date_esc', '$cat', '$venue', 'pending', $organizer_id, '$banners_esc', '$rules')";
     }
 
-    if ($conn->query($sql)) {
-        $new_id = (int) $conn->insert_id;
-        events_api_time_mark('db_insert', $tMark, $t0, $timings);
-
-        // Queue SMS + inbox + FCM (was inline — caused 10–20s+ timeouts).
-        $jobId = 0;
-        if ($new_id > 0) {
-            $jobId = bg_jobs_enqueue($conn, 'event_created_notify', [
-                'event_id' => $new_id,
-                'title'    => $title_plain,
-                'category' => $cat_plain,
-                'venue'    => $venue_plain,
-            ]);
-            if ($jobId <= 0) {
-                // Fallback: never lose the notify path if queue insert fails.
-                error_log('[events.php CREATE] queue enqueue failed; falling back to inline notify');
-                try {
-                    if ($title_plain !== '') {
-                        sms_notify_admins_event_created($conn, $title_plain);
-                    }
-                    $inbox_helper = __DIR__ . '/app_inbox_notifications_helper.php';
-                    if (is_readable($inbox_helper)) {
-                        require_once $inbox_helper;
-                        campus_inbox_after_event_created($conn, $new_id, $title_plain, $cat_plain, $venue_plain);
-                    }
-                } catch (Throwable $e) {
-                    error_log('[events.php CREATE] inline notify fallback: ' . $e->getMessage());
-                }
-            }
-
-            if ($deferBanners && $staged_files !== []) {
-                bg_jobs_enqueue($conn, 'event_banners_finalize', [
-                    'event_id'     => $new_id,
-                    'staged_files' => $staged_files,
-                ]);
-            }
+    try {
+        if (!$conn->query($sql)) {
+            throw new RuntimeException($conn->error !== '' ? $conn->error : 'INSERT failed');
         }
-        events_api_time_mark('enqueue_jobs', $tMark, $t0, $timings);
-
-        // Slim payload for Flutter post-publish (no nested organizer / full rules / description).
-        $response = [
-            'status'  => 'success',
-            'message' => 'Event-ti admin-er approval-er jonyo pathano hoyechhe',
-            'id'      => $new_id,
-            'event'   => [
-                'id'             => $new_id,
-                'title'          => $title_plain,
-                'status'         => 'pending',
-                'event_date'     => $start_raw,
-                'event_end_date' => ($end_raw !== null && $end_raw !== '') ? $end_raw : null,
-                'category'       => $cat_plain,
-                'venue'          => $venue_plain,
-                'banner_count'   => $deferBanners ? count($staged_files) : count($image_paths),
-            ],
-            'notify_queued' => $jobId > 0,
-        ];
-        if ($debugTiming) {
-            $response['timings_ms'] = $timings;
+    } catch (Throwable $e) {
+        $detail = $e->getMessage();
+        error_log('[events.php CREATE] insert failed organizer_id=' . $organizer_id . ' ' . $detail);
+        $message = 'Could not save event';
+        if (stripos($detail, 'foreign key constraint') !== false) {
+            $message = 'Organizer user_id does not exist';
+        } elseif (stripos($detail, 'Data too long') !== false) {
+            $message = 'One or more fields exceed the maximum allowed length';
         }
-        events_api_time_mark('response_ready', $tMark, $t0, $timings);
-        echo json_encode($response);
-    } else {
-        echo json_encode(["status" => "error", "message" => "Database error: " . $conn->error]);
+        echo json_encode(events_api_create_error($message, '', $detail));
+        exit();
     }
+
+    $new_id = (int) $conn->insert_id;
+    events_api_time_mark('db_insert', $tMark, $t0, $timings);
+
+    // Queue SMS + inbox + FCM (was inline — caused 10–20s+ timeouts).
+    $jobId = 0;
+    if ($new_id > 0) {
+        $jobId = bg_jobs_enqueue($conn, 'event_created_notify', [
+            'event_id' => $new_id,
+            'title'    => $title_plain,
+            'category' => $cat_plain,
+            'venue'    => $venue_plain,
+        ]);
+        if ($jobId <= 0) {
+            // Fallback: never lose the notify path if queue insert fails.
+            error_log('[events.php CREATE] queue enqueue failed; falling back to inline notify');
+            try {
+                if ($title_plain !== '') {
+                    sms_notify_admins_event_created($conn, $title_plain);
+                }
+                $inbox_helper = __DIR__ . '/app_inbox_notifications_helper.php';
+                if (is_readable($inbox_helper)) {
+                    require_once $inbox_helper;
+                    campus_inbox_after_event_created($conn, $new_id, $title_plain, $cat_plain, $venue_plain);
+                }
+            } catch (Throwable $e) {
+                error_log('[events.php CREATE] inline notify fallback: ' . $e->getMessage());
+            }
+        }
+
+        if ($deferBanners && $staged_files !== []) {
+            bg_jobs_enqueue($conn, 'event_banners_finalize', [
+                'event_id'     => $new_id,
+                'staged_files' => $staged_files,
+            ]);
+        }
+    }
+    events_api_time_mark('enqueue_jobs', $tMark, $t0, $timings);
+
+    // Slim payload for Flutter post-publish (no nested organizer / full rules / description).
+    $response = [
+        'status'  => 'success',
+        'message' => 'Event-ti admin-er approval-er jonyo pathano hoyechhe',
+        'id'      => $new_id,
+        'event'   => [
+            'id'             => $new_id,
+            'title'          => $title_plain,
+            'status'         => 'pending',
+            'event_date'     => $start_raw,
+            'event_end_date' => ($end_raw !== null && $end_raw !== '') ? $end_raw : null,
+            'category'       => $cat_plain,
+            'venue'          => $venue_plain,
+            'banner_count'   => $deferBanners ? count($staged_files) : count($image_paths),
+        ],
+        'notify_queued' => $jobId > 0,
+    ];
+    if ($banner_errors !== []) {
+        $response['banner_warnings'] = $banner_errors;
+    }
+    if ($debugTiming) {
+        $response['timings_ms'] = $timings;
+    }
+    events_api_time_mark('response_ready', $tMark, $t0, $timings);
+    echo json_encode($response);
 }
 
 // --- 3. UPDATE EVENT (PUT) - JSON body: same fields as create (title, description, event_date, category, venue) ---
