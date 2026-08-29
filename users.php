@@ -1,4 +1,8 @@
 <?php
+/**
+ * Admin panel — User Administration UI.
+ * Do NOT overwrite this with api/users.php (mobile register/login API).
+ */
 session_start();
 include 'db.php';
 require_once __DIR__ . '/admin_priv.php';

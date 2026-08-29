@@ -1,4 +1,8 @@
 <?php
+/**
+ * Mobile/API — register, login, OTP (JSON).
+ * Do NOT upload this file as admin/users.php (that is the admin Users page).
+ */
 include 'db.php';
 require_once __DIR__ . '/sms_helper.php';
 require_once __DIR__ . '/background_jobs_helper.php';
