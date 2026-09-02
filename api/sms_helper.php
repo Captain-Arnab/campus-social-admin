@@ -321,6 +321,10 @@ function process_job_login_otp_sms(array $payload, $conn = null, int $timeoutSec
     $message = (string) ($payload['message'] ?? '');
     $userId = isset($payload['user_id']) ? (int) $payload['user_id'] : null;
     $jobId = isset($payload['job_id']) ? (int) $payload['job_id'] : null;
+    $purpose = trim((string) ($payload['purpose'] ?? 'login_otp'));
+    if ($purpose === '') {
+        $purpose = 'login_otp';
+    }
     if ($dest === '' || $message === '') {
         throw new InvalidArgumentException('destination and message required');
     }
@@ -328,7 +332,7 @@ function process_job_login_otp_sms(array $payload, $conn = null, int $timeoutSec
         throw new InvalidArgumentException('destination must be 91XXXXXXXXXX, got: ' . $dest);
     }
     $send = sms_send_connectbind($dest, $message, null, $timeoutSec);
-    sms_log_attempt($conn, 'login_otp', $dest, $send, $jobId, $userId > 0 ? $userId : null);
+    sms_log_attempt($conn, $purpose, $dest, $send, $jobId, $userId > 0 ? $userId : null);
     if (!$send['ok']) {
         $detail = $send['error'] ?? '';
         if ($detail === '' && !empty($send['body'])) {

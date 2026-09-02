@@ -207,18 +207,28 @@ if ($action === 'request_otp') {
     }
 
     if ($channel === 'sms') {
-        $message = 'Your OTP for MiCampus password reset is ' . $otp . '. Do not share this code. Valid for 10 minutes. Micampus.co.in';
+        // Must match the registered DLT OTP template exactly (same as login OTP).
+        $message = sms_build_login_otp_message($otp);
+        error_log(sprintf(
+            '[forgot_password request_otp] user_id=%d dest=%s msg_len=%d template_match=login_otp',
+            $user_id,
+            $dest,
+            strlen($message)
+        ));
         $jobId = bg_jobs_enqueue($conn, 'login_otp_sms', [
             'user_id'     => $user_id,
             'destination' => $dest,
             'message'     => $message,
+            'purpose'     => 'password_reset_otp',
         ], 0, 3);
         if ($jobId <= 0) {
+            error_log('[forgot_password request_otp] enqueue failed user_id=' . $user_id);
             echo json_encode(['status' => 'error', 'message' => 'Could not queue OTP SMS']);
             exit();
         }
         $claimed = bg_jobs_claim_id($conn, $jobId);
         if ($claimed === null) {
+            error_log('[forgot_password request_otp] claim failed job_id=' . $jobId);
             echo json_encode(['status' => 'error', 'message' => 'Could not start OTP SMS']);
             exit();
         }
@@ -228,11 +238,18 @@ if ($action === 'request_otp') {
                 'destination' => $dest,
                 'message'     => $message,
                 'job_id'      => $jobId,
+                'purpose'     => 'password_reset_otp',
             ], $conn, 10);
             bg_jobs_mark_done($conn, $jobId);
+            error_log('[forgot_password request_otp] SMS ok job_id=' . $jobId . ' dest=' . $dest);
         } catch (Throwable $e) {
             bg_jobs_mark_failed_final($conn, $jobId, $e->getMessage());
-            echo json_encode(['status' => 'error', 'message' => 'Failed to send OTP SMS', 'detail' => $e->getMessage()]);
+            error_log('[forgot_password request_otp] SMS failed job_id=' . $jobId . ' ' . $e->getMessage());
+            echo json_encode([
+                'status'  => 'error',
+                'message' => 'Failed to send OTP SMS',
+                'detail'  => $e->getMessage(),
+            ]);
             exit();
         }
     } else {
