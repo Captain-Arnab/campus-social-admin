@@ -387,8 +387,8 @@ function cert_achievement_phrase(string $key): string
                                     <input type="text" class="form-control form-control-sm cert-field" id="f_signatory_location" value="<?php echo htmlspecialchars($defaults['signatory_location']); ?>" placeholder="Hyderabad, Telangana, India">
                                     <div class="form-text">Kept on white area — avoids overlap with corner graphic.</div>
                                 </div>
-                                <p class="small fw-bold text-muted mb-2 mt-2">Signature / seal image</p>
-                                <div class="form-text mb-2">Handwritten signature or stamp image (uploads/certificates/brand_seal.*). Text under the line (Registrar / university) always shows.</div>
+                                <p class="small fw-bold text-muted mb-2 mt-2">Signature image (above Registrar line)</p>
+                                <div class="form-text mb-2">Upload a PNG/JPG signature — it appears above the underline on the bottom-right. Turn on “Show signature image”.</div>
                                 <div class="cert-gen-media-row">
                                     <div id="sealFormPreviewWrap" class="cert-gen-thumb d-flex align-items-center justify-content-center bg-white p-1">
                                         <img id="sealFormPreview" src="<?php echo htmlspecialchars($seal_path); ?>" alt="" style="width:44px;height:44px;object-fit:contain;">
@@ -490,10 +490,7 @@ function cert_achievement_phrase(string $key): string
                                 </div>
                             </div>
 
-                            <div class="cert-date-block" id="cert_seal_block">
-                                <div class="cert-seal-wrap" id="cert_seal_wrap" style="<?php echo $defaults['seal_show'] ? '' : 'display:none;'; ?>">
-                                    <img id="cert_seal_img" class="cert-seal-img" src="<?php echo htmlspecialchars($seal_path); ?>" alt="">
-                                </div>
+                            <div class="cert-date-block" id="cert_date_block">
                                 <div class="cert-date-row">
                                     <i class="far fa-calendar-alt cert-date-icon" aria-hidden="true"></i>
                                     <div class="cert-date-val" id="v_certificate_date"><?php echo htmlspecialchars($defaults['certificate_date']); ?></div>
@@ -501,6 +498,9 @@ function cert_achievement_phrase(string $key): string
                             </div>
 
                             <div class="cert-sign-block" id="cert_sign_block">
+                                <div class="cert-sign-img-wrap" id="cert_seal_wrap" style="<?php echo $defaults['seal_show'] ? '' : 'display:none;'; ?>">
+                                    <img id="cert_seal_img" class="cert-seal-img" src="<?php echo htmlspecialchars($seal_path); ?>" alt="Signature">
+                                </div>
                                 <div class="cert-sign-line" aria-hidden="true">&nbsp;</div>
                                 <div class="cert-sign-title" id="v_signatory_title"><?php echo htmlspecialchars($defaults['signatory_title']); ?></div>
                                 <div class="cert-sign-uni" id="v_signatory_footer">
@@ -1138,21 +1138,36 @@ function cert_achievement_phrase(string $key): string
         const sealPart = document.getElementById('cert_seal_wrap');
         const img = document.getElementById('cert_seal_img');
         const has = img && (img.getAttribute('src') || '').trim();
-        if (sealPart) sealPart.style.display = (show && has) ? '' : 'none';
+        if (sealPart) {
+            sealPart.style.display = (show && has) ? 'block' : 'none';
+        }
+        if (img) {
+            img.style.display = (show && has) ? 'block' : 'none';
+        }
     }
 
     function setSealSrc(url) {
         const img = document.getElementById('cert_seal_img');
         const preview = document.getElementById('sealFormPreview');
         const urlInput = document.getElementById('f_seal_url');
+        const showToggle = document.getElementById('f_seal_show');
         if (!img) return;
         const u = (url || '').trim();
         if (u) {
             img.src = u;
             img.style.display = 'block';
             img.onload = function () { fitCertPreview(); };
+            img.onerror = function () {
+                // Broken path — hide so empty box doesn't confuse
+                img.removeAttribute('src');
+                applySealVisibility();
+            };
             if (preview) preview.src = u;
-            if (urlInput && urlInput.value.trim() !== u.split('?')[0]) urlInput.value = u.split('?')[0];
+            if (urlInput && !u.startsWith('data:') && urlInput.value.trim() !== u.split('?')[0]) {
+                urlInput.value = u.split('?')[0];
+            }
+            // Uploading / setting a signature should turn the overlay on.
+            if (showToggle) showToggle.checked = true;
             fitCertPreview();
         } else {
             img.removeAttribute('src');
@@ -1178,12 +1193,13 @@ function cert_achievement_phrase(string $key): string
         const file = this.files && this.files[0];
         if (!file) return;
         if (file.size > 2 * 1024 * 1024) {
-            Swal.fire('Too large', 'Seal image must be 2 MB or less.', 'warning');
+            Swal.fire('Too large', 'Signature image must be 2 MB or less.', 'warning');
             this.value = '';
             return;
         }
         const reader = new FileReader();
         reader.onload = function () {
+            document.getElementById('f_seal_show').checked = true;
             setSealSrc(reader.result);
             document.getElementById('f_seal_url').value = '';
         };
@@ -1193,15 +1209,15 @@ function cert_achievement_phrase(string $key): string
     document.getElementById('btnSealReset').addEventListener('click', function () {
         document.getElementById('f_seal_file').value = '';
         document.getElementById('f_seal_url').value = FALLBACK_SEAL_URL;
-        setSealSrc(FALLBACK_SEAL_URL);
         document.getElementById('f_seal_show').checked = true;
+        setSealSrc(FALLBACK_SEAL_URL);
         localStorage.removeItem(SEAL_STORAGE_KEY);
     });
 
     document.getElementById('btnSealSaveDefault').addEventListener('click', function () {
         const fileInput = document.getElementById('f_seal_file');
         if (!fileInput.files || !fileInput.files[0]) {
-            Swal.fire('No file', 'Choose a seal image file to upload as the shared default.', 'warning');
+            Swal.fire('No file', 'Choose a signature image file to upload as the shared default.', 'warning');
             return;
         }
         const fd = new FormData();
@@ -1210,6 +1226,7 @@ function cert_achievement_phrase(string $key): string
             .then(r => r.json())
             .then(data => {
                 if (data.status === 'success') {
+                    document.getElementById('f_seal_show').checked = true;
                     setSealSrc(data.seal_url);
                     document.getElementById('f_seal_url').value = data.seal_url.split('?')[0];
                     Swal.fire('Saved', data.message, 'success');

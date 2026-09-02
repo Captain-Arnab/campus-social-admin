@@ -263,28 +263,16 @@
     margin-top: 2px;
 }
 
-/* —— Date (above center seal on template) —— */
+/* —— Date (left of center trophy; kept clear of ornate border) —— */
 .cert-date-block {
     position: absolute;
-    bottom: 11.5%;
-    left: 50%;
-    transform: translateX(-130%);
+    bottom: 15.5%;
+    left: 30%;
+    transform: none;
     text-align: center;
-    width: 22%;
-    z-index: 2;
-}
-
-.cert-seal-wrap {
-    display: none;
-    width: 56px;
-    height: 56px;
-    margin: 0 auto 4px;
-}
-
-.cert-seal-wrap img.cert-seal-img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
+    width: 24%;
+    z-index: 4;
+    overflow: visible;
 }
 
 .cert-date-row {
@@ -292,33 +280,37 @@
     align-items: flex-end;
     justify-content: center;
     gap: 0.4em;
+    max-width: 100%;
 }
 
 .cert-date-icon {
     color: #c9a227;
-    font-size: 1.15em;
+    font-size: 1.05em;
     line-height: 1;
     margin-bottom: 0.15em;
     flex-shrink: 0;
 }
 
 .cert-date-val {
-    font-size: 0.85em;
+    font-size: 0.78em;
     font-weight: 600;
     color: #1a2d5a;
     border-bottom: 1px solid #1a2d5a;
     display: inline-block;
-    min-width: 120px;
-    padding: 0 6px 2px;
+    min-width: 0;
+    max-width: 100%;
+    padding: 0 4px 2px;
     text-align: center;
+    white-space: nowrap;
+    overflow: visible;
 }
 
-/* —— Signatory (bottom right) —— */
+/* —— Signatory (bottom right) + signature image above the line —— */
 .cert-sign-block {
     position: absolute;
-    bottom: 10.5%;
-    right: 6.5%;
-    width: 24%;
+    bottom: 11%;
+    right: 5.5%;
+    width: 26%;
     text-align: center;
     background: transparent;
     box-shadow: none;
@@ -331,11 +323,29 @@
     print-color-adjust: exact;
 }
 
+.cert-sign-img-wrap {
+    display: none;
+    width: 100%;
+    max-width: 160px;
+    height: 52px;
+    margin: 0 auto 2px;
+    line-height: 0;
+}
+
+.cert-sign-img-wrap img.cert-seal-img,
+.cert-seal-wrap img.cert-seal-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: center bottom;
+    display: block;
+}
+
 .cert-sign-line {
     border-bottom: 1.5px solid #1a2d5a;
-    height: 28px;
-    min-height: 28px;
-    line-height: 28px;
+    height: 8px;
+    min-height: 8px;
+    line-height: 8px;
     margin-bottom: 4px;
     color: transparent;
     font-size: 1px;
