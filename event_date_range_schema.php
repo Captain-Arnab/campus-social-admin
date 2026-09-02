@@ -137,3 +137,62 @@ function events_row_is_fully_past(array $eventRow): bool {
 function events_row_organizer_actions_allowed(array $eventRow): bool {
     return date('Y-m-d') >= date('Y-m-d', strtotime((string) ($eventRow['event_date'] ?? 'now')));
 }
+
+/**
+ * @param mysqli $conn
+ */
+function schema_events_has_registration_deadline($conn): bool {
+    static $v = null;
+    if ($v !== null) {
+        return $v;
+    }
+    $r = @$conn->query("SHOW COLUMNS FROM events LIKE 'registration_deadline'");
+    $v = ($r && $r->num_rows > 0);
+    return $v;
+}
+
+/**
+ * @param mysqli $conn
+ */
+function schema_events_has_closed_status($conn): bool {
+    static $v = null;
+    if ($v !== null) {
+        return $v;
+    }
+    $r = @$conn->query("SHOW COLUMNS FROM events LIKE 'closed_at'");
+    $v = ($r && $r->num_rows > 0);
+    return $v;
+}
+
+/**
+ * True when registration should be rejected.
+ * Deadline = registration_deadline if set, else event_date (start). Closed when NOW() >= cutoff.
+ *
+ * @param array<string,mixed> $eventRow must include event_date; registration_deadline optional
+ */
+function events_row_registration_closed(array $eventRow): bool {
+    $deadline = $eventRow['registration_deadline'] ?? null;
+    if ($deadline !== null && $deadline !== '' && $deadline !== '0000-00-00 00:00:00') {
+        return strtotime((string) $deadline) <= time();
+    }
+    return strtotime((string) ($eventRow['event_date'] ?? '')) <= time();
+}
+
+/**
+ * @param array<string,mixed> $eventRow
+ * @return array{can_close:bool,close_blockers:string[]}
+ */
+function events_row_close_info(array $eventRow): array {
+    $blockers = [];
+    if (($eventRow['status'] ?? '') === 'closed') {
+        return ['can_close' => false, 'close_blockers' => ['Event is already closed']];
+    }
+    if (!events_row_is_fully_past($eventRow)) {
+        $blockers[] = 'Event date has not passed yet';
+    }
+    $review = trim((string) ($eventRow['organizer_review'] ?? ''));
+    if ($review === '') {
+        $blockers[] = 'Organizer report (text) is required';
+    }
+    return ['can_close' => $blockers === [], 'close_blockers' => $blockers];
+}

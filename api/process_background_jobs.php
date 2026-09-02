@@ -27,6 +27,7 @@ if (php_sapi_name() !== 'cli') {
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/background_jobs_helper.php';
 require_once __DIR__ . '/sms_helper.php';
+require_once __DIR__ . '/event_stakeholder_notify.php';
 
 if (!isset($conn) || !$conn) {
     jobs_log('ERROR', 'Database connection failed');
@@ -75,6 +76,15 @@ foreach ($jobs as $job) {
             case 'login_otp_sms':
                 $payload['job_id'] = $id;
                 process_job_login_otp_sms($payload, $conn, 15);
+                break;
+            case 'event_approved_notify':
+                process_job_event_approved_notify($conn, $payload);
+                break;
+            case 'minutes_approved_notify':
+                process_job_minutes_approved_notify($conn, $payload);
+                break;
+            case 'generate_event_certificates':
+                process_job_generate_event_certificates($conn, $payload);
                 break;
             default:
                 throw new RuntimeException('Unknown job_type: ' . $type);
@@ -181,6 +191,15 @@ function process_job_event_banners_finalize($conn, array $payload): void
                 $finalNames[] = $base;
             }
             continue;
+        }
+        // Re-check poster limits on staged file before promoting.
+        $fsize = (int) @filesize($from);
+        $info = @getimagesize($from);
+        $w = is_array($info) ? (int) ($info[0] ?? 0) : 0;
+        $h = is_array($info) ? (int) ($info[1] ?? 0) : 0;
+        if ($fsize > 5 * 1024 * 1024 || $w <= 0 || $h <= 0 || $w > 1080 || $h > 1920) {
+            @unlink($from);
+            throw new RuntimeException('Poster must be ≤5MB and ≤1080×1920 px');
         }
         if (!@rename($from, $to)) {
             if (!@copy($from, $to)) {

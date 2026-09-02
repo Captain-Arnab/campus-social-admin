@@ -91,11 +91,23 @@ if (file_put_contents($path, $raw) === false) {
     exit;
 }
 
-$stmt = $conn->prepare(
-    'INSERT INTO event_certificates (event_id, user_id, type, file_path)
-     VALUES (?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE file_path = VALUES(file_path), uploaded_at = CURRENT_TIMESTAMP'
-);
+$hasStatus = false;
+$chk = @$conn->query("SHOW COLUMNS FROM event_certificates LIKE 'status'");
+$hasStatus = ($chk && $chk->num_rows > 0);
+
+if ($hasStatus) {
+    $stmt = $conn->prepare(
+        "INSERT INTO event_certificates (event_id, user_id, type, status, file_path)
+         VALUES (?, ?, ?, 'ready', ?)
+         ON DUPLICATE KEY UPDATE file_path = VALUES(file_path), status = 'ready', uploaded_at = CURRENT_TIMESTAMP"
+    );
+} else {
+    $stmt = $conn->prepare(
+        'INSERT INTO event_certificates (event_id, user_id, type, file_path)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE file_path = VALUES(file_path), uploaded_at = CURRENT_TIMESTAMP'
+    );
+}
 if (!$stmt) {
     @unlink($path);
     http_response_code(500);

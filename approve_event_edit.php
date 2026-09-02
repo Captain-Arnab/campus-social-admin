@@ -2,6 +2,7 @@
 session_start();
 include 'db.php';
 require_once __DIR__ . '/admin_priv.php';
+require_once __DIR__ . '/api/background_jobs_helper.php';
 
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     header("Location: index.php");
@@ -25,6 +26,9 @@ if (!$pending) {
     header("Location: event_details.php?id=$id&msg=no_pending");
     exit();
 }
+
+$evBefore = $conn->query("SELECT status, title, organizer_id FROM events WHERE id = $id")->fetch_assoc();
+$oldStatus = $evBefore['status'] ?? 'pending';
 
 if ($action === 'approve') {
     $title = $conn->real_escape_string($pending['title']);
@@ -63,21 +67,62 @@ if ($action === 'approve') {
             $b_esc = $conn->real_escape_string($pending['banners']);
             $conn->query("UPDATE events SET banners='$b_esc' WHERE id=$id");
         }
+
+        // Restore to approved (C2: was flipped to pending on edit).
+        $conn->query("UPDATE events SET status = 'approved' WHERE id = $id");
+
         $conn->query("DELETE FROM event_pending_edits WHERE event_id = $id");
         $log_stmt = $conn->prepare("INSERT INTO event_status_log (event_id, admin_type, admin_username, old_status, new_status, remarks) VALUES (?, ?, ?, ?, ?, ?)");
-        $ev = $conn->query("SELECT status FROM events WHERE id = $id")->fetch_assoc();
-        $st = $ev['status'];
+        $newStatus = 'approved';
         $remarks = "Event edit approved by " . $user_type . " (" . $username . ")";
-        $log_stmt->bind_param("isssss", $id, $user_type, $username, $st, $st, $remarks);
+        $log_stmt->bind_param("isssss", $id, $user_type, $username, $oldStatus, $newStatus, $remarks);
         $log_stmt->execute();
         $log_stmt->close();
+
+        // Notify organizer via existing FCM/inbox path
+        require_once __DIR__ . '/api/app_inbox_notifications_helper.php';
+        $orgId = (int) ($evBefore['organizer_id'] ?? 0);
+        $titlePlain = (string) ($pending['title'] ?? ($evBefore['title'] ?? 'Event'));
+        if ($orgId > 0) {
+            campus_inbox_after_admin_approve_or_reject($conn, $id, 'approve', $orgId, $titlePlain, '');
+        }
+
+        bg_jobs_enqueue($conn, 'event_approved_notify', [
+            'event_id' => $id,
+            'title' => $titlePlain,
+        ]);
+
         header("Location: event_details.php?id=$id&msg=edit_approved");
         exit();
     }
     $stmt->close();
 }
 
-// Reject or on error
+// Reject: discard pending edits; restore status to approved (live content unchanged).
 $conn->query("DELETE FROM event_pending_edits WHERE event_id = $id");
+if (($oldStatus === 'pending') || $oldStatus === 'approved') {
+    $conn->query("UPDATE events SET status = 'approved' WHERE id = $id");
+    $log_stmt = $conn->prepare("INSERT INTO event_status_log (event_id, admin_type, admin_username, old_status, new_status, remarks) VALUES (?, ?, ?, ?, ?, ?)");
+    $newStatus = 'approved';
+    $remarks = "Event edit rejected by " . $user_type . " (" . $username . "); previous content kept";
+    $log_stmt->bind_param("isssss", $id, $user_type, $username, $oldStatus, $newStatus, $remarks);
+    $log_stmt->execute();
+    $log_stmt->close();
+
+    require_once __DIR__ . '/api/app_inbox_notifications_helper.php';
+    $orgId = (int) ($evBefore['organizer_id'] ?? 0);
+    $titlePlain = (string) ($evBefore['title'] ?? 'Event');
+    if ($orgId > 0) {
+        campus_inbox_after_admin_approve_or_reject(
+            $conn,
+            $id,
+            'reject',
+            $orgId,
+            $titlePlain,
+            'Your recent event edit was rejected; previous details remain.'
+        );
+    }
+}
+
 header("Location: event_details.php?id=$id&msg=" . ($action === 'reject' ? 'edit_rejected' : 'edit_failed'));
 exit();

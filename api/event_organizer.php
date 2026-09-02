@@ -42,9 +42,15 @@ if ($event_id <= 0 || $organizer_id <= 0) {
     exit();
 }
 
-$evCols = 'SELECT id, organizer_id, event_date';
+$evCols = 'SELECT id, organizer_id, event_date, status, organizer_review';
 if (schema_events_has_event_end_date($conn)) {
     $evCols .= ', event_end_date';
+}
+$hasClosedAt = false;
+$chkClosed = @$conn->query("SHOW COLUMNS FROM events LIKE 'closed_at'");
+if ($chkClosed && $chkClosed->num_rows > 0) {
+    $evCols .= ', closed_at, closed_by';
+    $hasClosedAt = true;
 }
 $evCols .= ' FROM events WHERE id = ?';
 $ev = $conn->prepare($evCols);
@@ -59,7 +65,8 @@ if (!$er || (int) $er['organizer_id'] !== $organizer_id) {
     exit();
 }
 
-if (!events_row_organizer_actions_allowed($er)) {
+// Close can run after event end; other actions keep on/after-start gate.
+if ($action !== 'close' && !events_row_organizer_actions_allowed($er)) {
     http_response_code(400);
     echo json_encode(['status' => 'error', 'message' => 'Review and attendance are only allowed on or after the event start date']);
     exit();
@@ -225,5 +232,64 @@ if ($action === 'update_participant_department') {
     exit();
 }
 
+if ($action === 'close') {
+    require_once __DIR__ . '/background_jobs_helper.php';
+    $closeInfo = events_row_close_info($er);
+    if (($er['status'] ?? '') === 'closed') {
+        echo json_encode(['status' => 'error', 'message' => 'Event is already closed', 'can_close' => false, 'close_blockers' => ['Event is already closed']]);
+        exit();
+    }
+    if (!$closeInfo['can_close']) {
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'Cannot close event yet',
+            'can_close' => false,
+            'close_blockers' => $closeInfo['close_blockers'],
+        ]);
+        exit();
+    }
+
+    if ($hasClosedAt) {
+        $st = $conn->prepare("UPDATE events SET status = 'closed', closed_at = NOW(), closed_by = ? WHERE id = ?");
+        $st->bind_param('ii', $organizer_id, $event_id);
+    } else {
+        // Enum may not include closed yet — try and surface a clear error.
+        $st = $conn->prepare("UPDATE events SET status = 'closed' WHERE id = ?");
+        $st->bind_param('i', $event_id);
+    }
+    if (!$st->execute()) {
+        echo json_encode(['status' => 'error', 'message' => 'Close failed — ensure migrations/2026_batch_features.sql has been applied', 'detail' => $st->error]);
+        $st->close();
+        exit();
+    }
+    $st->close();
+
+    $log = $conn->prepare("INSERT INTO event_status_log (event_id, admin_type, admin_username, old_status, new_status, remarks) VALUES (?, 'app', ?, ?, 'closed', 'Event closed by organizer')");
+    if ($log) {
+        $old = (string) ($er['status'] ?? 'approved');
+        $uname = 'user_' . $organizer_id;
+        $log->bind_param('iss', $event_id, $uname, $old);
+        $log->execute();
+        $log->close();
+    }
+
+    $enqueue_certs = !isset($data['generate_certificates']) || !empty($data['generate_certificates']);
+    $jobId = 0;
+    if ($enqueue_certs) {
+        $jobId = bg_jobs_enqueue($conn, 'generate_event_certificates', [
+            'event_id' => $event_id,
+        ]);
+    }
+
+    echo json_encode([
+        'status' => 'success',
+        'message' => 'Event closed',
+        'certificates_job_id' => $jobId,
+        'can_close' => false,
+        'close_blockers' => ['Event is already closed'],
+    ]);
+    exit();
+}
+
 http_response_code(400);
-echo json_encode(['status' => 'error', 'message' => 'Unknown action; use set_review, set_attendance, update_volunteer_role, or update_participant_department']);
+echo json_encode(['status' => 'error', 'message' => 'Unknown action; use set_review, set_attendance, update_volunteer_role, update_participant_department, or close']);

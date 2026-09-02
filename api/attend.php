@@ -57,8 +57,13 @@ try {
     }
     $user_check->close();
     
-    // Check if event exists
-    $event_check = $conn->prepare("SELECT id FROM events WHERE id = ?");
+    // Check if event exists + registration deadline
+    require_once __DIR__ . '/../event_date_range_schema.php';
+    $evCols = 'id, event_date';
+    if (schema_events_has_registration_deadline($conn)) {
+        $evCols .= ', registration_deadline';
+    }
+    $event_check = $conn->prepare("SELECT $evCols FROM events WHERE id = ?");
     if (!$event_check) {
         http_response_code(500);
         echo json_encode(["status" => "error", "message" => "Database error: " . $conn->error]);
@@ -75,8 +80,14 @@ try {
         $event_check->close();
         exit();
     }
+    $event_row = $event_result->fetch_assoc();
     $event_check->close();
-    
+
+    if (events_row_registration_closed($event_row)) {
+        http_response_code(400);
+        echo json_encode(["status" => "error", "message" => "Registration closed for this event"]);
+        exit();
+    }    
     // Check if user is already an attendee for this event
     $check_query = "SELECT id FROM attendees WHERE user_id = ? AND event_id = ?";
     $stmt = $conn->prepare($check_query);

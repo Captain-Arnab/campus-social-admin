@@ -75,9 +75,13 @@ try {
     $user_is_student = intval($user_data['is_student']);
     $user_stmt->close();
     
-    // Get event organizer's is_student status
-    $event_query = "SELECT u.is_student as organizer_is_student 
-                    FROM events e 
+    // Get event organizer's is_student status + registration deadline fields
+    require_once __DIR__ . '/../event_date_range_schema.php';
+    $event_query = "SELECT u.is_student as organizer_is_student, e.event_date";
+    if (schema_events_has_registration_deadline($conn)) {
+        $event_query .= ", e.registration_deadline";
+    }
+    $event_query .= " FROM events e 
                     JOIN users u ON e.organizer_id = u.id 
                     WHERE e.id = ?";
     $event_stmt = $conn->prepare($event_query);
@@ -102,6 +106,12 @@ try {
     $event_data = $event_result->fetch_assoc();
     $organizer_is_student = intval($event_data['organizer_is_student']);
     $event_stmt->close();
+
+    if (events_row_registration_closed($event_data)) {
+        http_response_code(400);
+        echo json_encode(["status" => "error", "message" => "Registration closed for this event"]);
+        exit();
+    }
     
     // Check eligibility: volunteer can only join if their role matches organizer's role
     // Students can volunteer for student events, Faculty can volunteer for faculty events

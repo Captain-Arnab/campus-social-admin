@@ -62,6 +62,32 @@ function certificate_file_exists($file_path) {
 
 $method = $_SERVER['REQUEST_METHOD'];
 
+if ($method === 'POST') {
+    require_once __DIR__ . '/background_jobs_helper.php';
+    $data = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($data)) {
+        $data = $_POST;
+    }
+    $action = $data['action'] ?? ($_GET['action'] ?? '');
+    if ($action === 'generate_all') {
+        $eid = (int) ($data['event_id'] ?? 0);
+        if ($eid <= 0) {
+            echo json_encode(['status' => 'error', 'message' => 'event_id required']);
+            exit();
+        }
+        $jobId = bg_jobs_enqueue($conn, 'generate_event_certificates', ['event_id' => $eid]);
+        echo json_encode([
+            'status' => 'success',
+            'message' => 'Certificate generation queued (pending rows for browser Generate All)',
+            'job_id' => $jobId,
+        ]);
+        exit();
+    }
+    http_response_code(400);
+    echo json_encode(['status' => 'error', 'message' => 'Unknown action']);
+    exit();
+}
+
 if ($method !== 'GET') {
     http_response_code(405);
     echo json_encode(["status" => "error", "message" => "Method not allowed"]);
@@ -118,8 +144,13 @@ if ($user_id > 0) {
 }
 
 if ($event_id > 0) {
+    $hasStatus = false;
+    $chk = @$conn->query("SHOW COLUMNS FROM event_certificates LIKE 'status'");
+    $hasStatus = ($chk && $chk->num_rows > 0);
+    $statusCol = $hasStatus ? ', c.status' : '';
+
     $stmt = $conn->prepare(
-        "SELECT c.id, c.event_id, c.user_id, c.type, c.file_path, c.uploaded_at, u.full_name
+        "SELECT c.id, c.event_id, c.user_id, c.type, c.file_path, c.uploaded_at{$statusCol}, u.full_name
          FROM event_certificates c
          INNER JOIN users u ON c.user_id = u.id
          WHERE c.event_id = ?
@@ -131,18 +162,23 @@ if ($event_id > 0) {
     $list = [];
     while ($row = $result->fetch_assoc()) {
         $rel = $row['file_path'];
-        $abs = certificate_public_url($rel);
+        $ready = $hasStatus
+            ? (($row['status'] ?? '') === 'ready' && certificate_file_exists($rel))
+            : certificate_file_exists($rel);
+        $status = $ready ? 'ready' : 'pending';
+        $abs = $ready ? certificate_public_url($rel) : '';
         $list[] = [
             'id' => (int) $row['id'],
             'event_id' => (int) $row['event_id'],
             'user_id' => (int) $row['user_id'],
             'full_name' => $row['full_name'],
             'type' => $row['type'],
+            'status' => $status,
             'file_path' => $rel,
             'certificate_url' => $abs,
             'url' => $abs,
-            'download_url' => certificate_download_url($row['id']),
-            'file_exists' => certificate_file_exists($rel),
+            'download_url' => $ready ? certificate_download_url($row['id']) : '',
+            'file_exists' => $ready,
             'uploaded_at' => $row['uploaded_at'],
         ];
     }

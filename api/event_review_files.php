@@ -20,6 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/../event_date_range_schema.php';
+require_once __DIR__ . '/admin_public_url.php';
 
 if (!isset($conn) || !$conn) {
     http_response_code(500);
@@ -41,6 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $res = $stmt->get_result();
     $files = [];
     while ($row = $res->fetch_assoc()) {
+        $row['file_url'] = admin_public_file_url($row['file_path'] ?? '');
         $files[] = $row;
     }
     $stmt->close();

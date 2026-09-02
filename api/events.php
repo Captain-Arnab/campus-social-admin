@@ -3,6 +3,7 @@ include 'db.php';
 require_once __DIR__ . '/sms_helper.php';
 require_once __DIR__ . '/background_jobs_helper.php';
 require_once __DIR__ . '/../event_date_range_schema.php';
+require_once __DIR__ . '/admin_public_url.php';
 $method = $_SERVER['REQUEST_METHOD'];
 
 /**
@@ -40,6 +41,56 @@ function events_api_upload_error_message(int $code): string
             return 'Banner upload blocked by server extension';
         default:
             return 'Banner upload failed (error code ' . $code . ')';
+    }
+}
+
+/** Poster/banner hard limits: ≤5MB and ≤1080×1920 px. */
+function events_api_banner_limits_ok(string $tmpPath, int $fileSize): bool
+{
+    if ($fileSize > 5 * 1024 * 1024) {
+        return false;
+    }
+    $info = @getimagesize($tmpPath);
+    if ($info === false) {
+        return false;
+    }
+    $w = (int) ($info[0] ?? 0);
+    $h = (int) ($info[1] ?? 0);
+    return $w > 0 && $h > 0 && $w <= 1080 && $h <= 1920;
+}
+
+function events_api_banner_limit_error(): array
+{
+    return [
+        'status' => 'error',
+        'message' => 'Poster must be ≤5MB and ≤1080×1920 px',
+    ];
+}
+
+/**
+ * After staging an edit for an approved event: flip live status to pending + log.
+ * Keeps old content on the events row until admin approves via approve_event_edit.php.
+ */
+function events_api_mark_awaiting_edit_reapproval($conn, int $eventId, int $submittedByUserId = 0): void
+{
+    if ($eventId <= 0) {
+        return;
+    }
+    $old = 'approved';
+    $st = @$conn->query('SELECT status FROM events WHERE id = ' . (int) $eventId . ' LIMIT 1');
+    if ($st && ($row = $st->fetch_assoc())) {
+        $old = (string) ($row['status'] ?? 'approved');
+    }
+    @$conn->query("UPDATE events SET status = 'pending' WHERE id = " . (int) $eventId);
+    $adminType = 'app';
+    $adminUser = $submittedByUserId > 0 ? ('user_' . $submittedByUserId) : 'organizer';
+    $new = 'pending';
+    $remarks = 'Approved event edited via app; awaiting reapproval';
+    $log = $conn->prepare('INSERT INTO event_status_log (event_id, admin_type, admin_username, old_status, new_status, remarks) VALUES (?, ?, ?, ?, ?, ?)');
+    if ($log) {
+        $log->bind_param('isssss', $eventId, $adminType, $adminUser, $old, $new, $remarks);
+        $log->execute();
+        $log->close();
     }
 }
 
@@ -81,6 +132,13 @@ function events_api_enrich_event_row(array &$row): void
     $row['share_url'] = events_api_public_base() . $path . $eid;
     $title = (string) ($row['title'] ?? 'Event');
     $row['share_text'] = $title . ' — ' . $row['share_url'];
+
+    $close = events_row_close_info($row);
+    $row['can_close'] = $close['can_close'];
+    $row['close_blockers'] = $close['close_blockers'];
+    if (!array_key_exists('registration_deadline', $row)) {
+        $row['registration_deadline'] = null;
+    }
 }
 
 /**
@@ -319,10 +377,20 @@ if ($method == 'GET') {
             
             // Event winners (from participants)
             $row['winners'] = [];
-            $win_res = @$conn->query("SELECT w.user_id, w.position, u.full_name FROM event_winners w JOIN users u ON w.user_id = u.id WHERE w.event_id = $event_id ORDER BY w.position ASC");
+            $winCols = "w.user_id, w.position, u.full_name";
+            $hasWinPhoto = @$conn->query("SHOW COLUMNS FROM event_winners LIKE 'photo_path'");
+            if ($hasWinPhoto && $hasWinPhoto->num_rows > 0) {
+                $winCols .= ", w.photo_path";
+            }
+            $win_res = @$conn->query("SELECT $winCols FROM event_winners w JOIN users u ON w.user_id = u.id WHERE w.event_id = $event_id ORDER BY w.position ASC");
             if ($win_res) {
                 while ($w = $win_res->fetch_assoc()) {
-                    $row['winners'][] = ['user_id' => (int) $w['user_id'], 'full_name' => $w['full_name'], 'position' => (int) $w['position']];
+                    $item = ['user_id' => (int) $w['user_id'], 'full_name' => $w['full_name'], 'position' => (int) $w['position']];
+                    if (!empty($w['photo_path'])) {
+                        $item['photo_path'] = $w['photo_path'];
+                        $item['photo_url'] = admin_public_file_url($w['photo_path']);
+                    }
+                    $row['winners'][] = $item;
                 }
             }
             $row['attendance_locked'] = !empty($row['winners']);
@@ -330,7 +398,10 @@ if ($method == 'GET') {
             $row['review_files'] = [];
             $rf_res = @$conn->query("SELECT id, file_path, file_type, original_name, uploaded_at FROM event_review_files WHERE event_id = $event_id ORDER BY uploaded_at ASC");
             if ($rf_res) {
-                while ($rf = $rf_res->fetch_assoc()) { $row['review_files'][] = $rf; }
+                while ($rf = $rf_res->fetch_assoc()) {
+                    $rf['file_url'] = admin_public_file_url($rf['file_path'] ?? '');
+                    $row['review_files'][] = $rf;
+                }
             }
 
             // Pending edit (when event has editors, organizer/editor edits await admin approval)
@@ -433,6 +504,11 @@ elseif ($method == 'POST') {
             }
             foreach ($_FILES['banners']['tmp_name'] as $key => $tmp_name) {
                 if ($_FILES['banners']['error'][$key] === UPLOAD_ERR_OK) {
+                    $fsize = (int) ($_FILES['banners']['size'][$key] ?? 0);
+                    if (!events_api_banner_limits_ok($tmp_name, $fsize)) {
+                        echo json_encode(events_api_banner_limit_error());
+                        exit();
+                    }
                     $filename = "evt_" . time() . "_" . $key . "_" . basename($_FILES['banners']['name'][$key]);
                     if (move_uploaded_file($tmp_name, "../uploads/events/" . $filename)) {
                         $image_paths[] = $filename;
@@ -442,14 +518,29 @@ elseif ($method == 'POST') {
         }
         $banners_json = !empty($image_paths) ? json_encode($image_paths) : $evt['banners'];
 
-        $event_has_editors = false;
-        $ed_count = @$conn->query("SELECT 1 FROM event_editors WHERE event_id = $id LIMIT 1");
-        if ($ed_count && $ed_count->num_rows > 0) {
-            $event_has_editors = true;
+        // Any app edit of an approved event goes to pending reapproval (C2).
+        // Also keep staging if already pending due to a prior edit.
+        $hasPendingEdit = false;
+        $peChk = @$conn->query("SELECT 1 FROM event_pending_edits WHERE event_id = $id LIMIT 1");
+        if ($peChk && $peChk->num_rows > 0) {
+            $hasPendingEdit = true;
         }
-        $needs_approval = ($event_has_editors && $evt['status'] === 'approved');
+        $needs_approval = ($evt['status'] === 'approved') || ($evt['status'] === 'pending' && $hasPendingEdit);
 
         if ($needs_approval) {
+            // Operational field: apply registration_deadline immediately on the live row.
+            if (schema_events_has_registration_deadline($conn) && array_key_exists('registration_deadline', $_POST)) {
+                $rdRaw = trim((string) $_POST['registration_deadline']);
+                if ($rdRaw === '') {
+                    @$conn->query("UPDATE events SET registration_deadline = NULL WHERE id = $id");
+                } else {
+                    $rd = events_normalize_dt($rdRaw);
+                    if ($rd !== null) {
+                        $rd_esc = $conn->real_escape_string($rd);
+                        @$conn->query("UPDATE events SET registration_deadline = '$rd_esc' WHERE id = $id");
+                    }
+                }
+            }
             $hasPeEnd = schema_event_pending_edits_has_event_end_date($conn);
             $ebe      = $post_end_bind;
             $has_banners_col = @$conn->query("SHOW COLUMNS FROM event_pending_edits LIKE 'banners'");
@@ -470,6 +561,7 @@ elseif ($method == 'POST') {
                 }
                 if ($stmt && $stmt->execute()) {
                     $stmt->close();
+                    events_api_mark_awaiting_edit_reapproval($conn, $id, $user_id);
                     echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
                 } elseif ($stmt) {
                     $stmt->close();
@@ -491,6 +583,7 @@ elseif ($method == 'POST') {
                 }
                 if ($stmt && $stmt->execute()) {
                     $stmt->close();
+                    events_api_mark_awaiting_edit_reapproval($conn, $id, $user_id);
                     echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
                 } elseif ($stmt) {
                     $stmt->close();
@@ -511,6 +604,7 @@ elseif ($method == 'POST') {
             }
             if ($stmt && $stmt->execute()) {
                 $stmt->close();
+                events_api_mark_awaiting_edit_reapproval($conn, $id, $user_id);
                 echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
             } elseif ($stmt) {
                 $stmt->close();
@@ -534,6 +628,18 @@ elseif ($method == 'POST') {
         }
         $sql = "UPDATE events SET title='$title_esc', description='$desc_esc', venue='$venue_esc', event_date='$event_date_esc'{$end_sql_fragment}, category='$category_esc', banners='$banners_esc', rules='$rules_esc' WHERE id=$id";
         if ($conn->query($sql)) {
+            if (schema_events_has_registration_deadline($conn) && array_key_exists('registration_deadline', $_POST)) {
+                $rdRaw = trim((string) $_POST['registration_deadline']);
+                if ($rdRaw === '') {
+                    @$conn->query("UPDATE events SET registration_deadline = NULL WHERE id = $id");
+                } else {
+                    $rd = events_normalize_dt($rdRaw);
+                    if ($rd !== null) {
+                        $rd_esc = $conn->real_escape_string($rd);
+                        @$conn->query("UPDATE events SET registration_deadline = '$rd_esc' WHERE id = $id");
+                    }
+                }
+            }
             echo json_encode(["status" => "success", "message" => "Event updated"]);
         } else {
             echo json_encode(["status" => "error", "message" => $conn->error]);
@@ -676,6 +782,11 @@ elseif ($method == 'POST') {
                 error_log('[events.php CREATE] banner upload error key=' . $key . ' ' . $msg);
                 continue;
             }
+            $fsize = (int) ($_FILES['banners']['size'][$key] ?? filesize($tmp_name) ?: 0);
+            if (!events_api_banner_limits_ok($tmp_name, $fsize)) {
+                echo json_encode(events_api_banner_limit_error());
+                exit();
+            }
             $safeBase = preg_replace('/[^A-Za-z0-9._-]/', '_', basename((string) $_FILES['banners']['name'][$key]));
             $filename = 'evt_' . time() . '_' . $key . '_' . $safeBase;
             if (move_uploaded_file($tmp_name, $targetDir . '/' . $filename)) {
@@ -729,6 +840,17 @@ elseif ($method == 'POST') {
 
     $new_id = (int) $conn->insert_id;
     events_api_time_mark('db_insert', $tMark, $t0, $timings);
+
+    if ($new_id > 0 && schema_events_has_registration_deadline($conn)) {
+        $rd = null;
+        if (isset($_POST['registration_deadline']) && trim((string) $_POST['registration_deadline']) !== '') {
+            $rd = events_normalize_dt((string) $_POST['registration_deadline']);
+        }
+        if ($rd !== null) {
+            $rd_esc = $conn->real_escape_string($rd);
+            @$conn->query("UPDATE events SET registration_deadline = '$rd_esc' WHERE id = $new_id");
+        }
+    }
 
     // Queue SMS + inbox + FCM (was inline — caused 10–20s+ timeouts).
     $jobId = 0;
@@ -870,14 +992,27 @@ elseif ($method == 'PUT') {
         $banners_json = json_encode(array_map(function ($f) use ($conn) { return $conn->real_escape_string($f); }, $data['banners']));
     }
 
-    $event_has_editors = false;
-    $ed_count = @$conn->query("SELECT 1 FROM event_editors WHERE event_id = $id LIMIT 1");
-    if ($ed_count && $ed_count->num_rows > 0) {
-        $event_has_editors = true;
+    // Any app edit of an approved event goes to pending reapproval (C2).
+    $hasPendingEdit = false;
+    $peChk = @$conn->query("SELECT 1 FROM event_pending_edits WHERE event_id = $id LIMIT 1");
+    if ($peChk && $peChk->num_rows > 0) {
+        $hasPendingEdit = true;
     }
-    $needs_approval = ($event_has_editors && $evt['status'] === 'approved');
+    $needs_approval = ($evt['status'] === 'approved') || ($evt['status'] === 'pending' && $hasPendingEdit);
 
     if ($needs_approval) {
+        if (schema_events_has_registration_deadline($conn) && array_key_exists('registration_deadline', $data)) {
+            $rdRaw = trim((string) $data['registration_deadline']);
+            if ($rdRaw === '') {
+                @$conn->query("UPDATE events SET registration_deadline = NULL WHERE id = $id");
+            } else {
+                $rd = events_normalize_dt($rdRaw);
+                if ($rd !== null) {
+                    $rd_esc = $conn->real_escape_string($rd);
+                    @$conn->query("UPDATE events SET registration_deadline = '$rd_esc' WHERE id = $id");
+                }
+            }
+        }
         $hasPeEnd = schema_event_pending_edits_has_event_end_date($conn);
         $ebe      = $post_end_bind;
         $has_banners_col = @$conn->query("SHOW COLUMNS FROM event_pending_edits LIKE 'banners'");
@@ -898,6 +1033,7 @@ elseif ($method == 'PUT') {
             }
             if ($stmt && $stmt->execute()) {
                 $stmt->close();
+                events_api_mark_awaiting_edit_reapproval($conn, $id, $user_id);
                 echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
             } elseif ($stmt) {
                 $stmt->close();
@@ -919,6 +1055,7 @@ elseif ($method == 'PUT') {
             }
             if ($stmt && $stmt->execute()) {
                 $stmt->close();
+                events_api_mark_awaiting_edit_reapproval($conn, $id, $user_id);
                 echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
             } elseif ($stmt) {
                 $stmt->close();
@@ -939,6 +1076,7 @@ elseif ($method == 'PUT') {
         }
         if ($stmt && $stmt->execute()) {
             $stmt->close();
+            events_api_mark_awaiting_edit_reapproval($conn, $id, $user_id);
             echo json_encode(["status" => "success", "message" => "Edit submitted for admin approval", "pending_approval" => true]);
         } elseif ($stmt) {
             $stmt->close();
@@ -960,6 +1098,18 @@ elseif ($method == 'PUT') {
     $sql = "UPDATE events SET title='$title', description='$desc', venue='$venue', event_date='$event_date_esc'{$end_sql_put}, category='$category', banners='$banners_esc', rules='$rules_esc' WHERE id=$id";
 
     if ($conn->query($sql)) {
+        if (schema_events_has_registration_deadline($conn) && array_key_exists('registration_deadline', $data)) {
+            $rdRaw = trim((string) $data['registration_deadline']);
+            if ($rdRaw === '') {
+                @$conn->query("UPDATE events SET registration_deadline = NULL WHERE id = $id");
+            } else {
+                $rd = events_normalize_dt($rdRaw);
+                if ($rd !== null) {
+                    $rd_esc = $conn->real_escape_string($rd);
+                    @$conn->query("UPDATE events SET registration_deadline = '$rd_esc' WHERE id = $id");
+                }
+            }
+        }
         echo json_encode(["status" => "success", "message" => "Event updated"]);
     } else {
         echo json_encode(["status" => "error", "message" => $conn->error]);

@@ -1,0 +1,11 @@
+<?php
+/**
+ * Example local SMTP override (copy to smtp_config.local.php — do not commit secrets).
+ * return [
+ *   'username'   => 'micampusco@gmail.com',
+ *   'password'   => 'your-app-password',
+ *   'from_email' => 'micampusco@gmail.com',
+ *   'from_name'  => 'MiCampus',
+ * ];
+ */
+return [];

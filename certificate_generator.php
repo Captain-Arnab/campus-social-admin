@@ -498,13 +498,13 @@ function cert_achievement_phrase(string $key): string
                                 </div>
                             </div>
 
-                            <div class="cert-sign-block">
-                                <div class="cert-sign-line"></div>
-                                <p class="cert-sign-title" id="v_signatory_title"><?php echo htmlspecialchars($defaults['signatory_title']); ?></p>
-                                <p class="cert-sign-uni" id="v_signatory_footer">
-                                    <span id="v_signatory_uni"><?php echo htmlspecialchars($defaults['university_name']); ?></span>
-                                    <span class="cert-sign-loc"><span id="v_signatory_location"><?php echo htmlspecialchars($defaults['signatory_location']); ?></span></span>
-                                </p>
+                            <div class="cert-sign-block" id="cert_sign_block">
+                                <div class="cert-sign-line" aria-hidden="true">&nbsp;</div>
+                                <div class="cert-sign-title" id="v_signatory_title"><?php echo htmlspecialchars($defaults['signatory_title']); ?></div>
+                                <div class="cert-sign-uni" id="v_signatory_footer">
+                                    <div id="v_signatory_uni"><?php echo htmlspecialchars($defaults['university_name']); ?></div>
+                                    <div class="cert-sign-loc" id="v_signatory_location"><?php echo htmlspecialchars($defaults['signatory_location']); ?></div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -981,14 +981,15 @@ function cert_achievement_phrase(string $key): string
 
     function applyQrVisibility() {
         const show = document.getElementById('f_qr_show').checked;
-        const block = document.getElementById('cert_qr_block');
         const src = (document.getElementById('cert_qr_img').getAttribute('src') || '').trim();
         const hasImg = !!src;
-        if (block) block.style.opacity = show ? '1' : '0.35';
+        const qrVisible = show && hasImg;
+        const block = document.getElementById('cert_qr_block');
+        if (block) block.style.opacity = '1';
         const box = document.getElementById('cert_qr_box');
-        if (box) box.style.visibility = show ? 'visible' : 'hidden';
+        if (box) box.style.display = qrVisible ? '' : 'none';
         const label = document.getElementById('v_qr_scan_label');
-        if (label) label.style.visibility = show ? 'visible' : 'hidden';
+        if (label) label.style.display = qrVisible ? '' : 'none';
         return hasImg;
     }
 
@@ -1248,20 +1249,56 @@ function cert_achievement_phrase(string $key): string
     }
 
     async function renderCanvas() {
+        applyQrVisibility();
         const canvas = document.getElementById('certCanvas');
         const prevTransform = canvas.style.transform;
+        const prevOverflow = canvas.style.overflow;
         canvas.style.transform = 'none';
+        // html2canvas clips absolute footer overlays when overflow:hidden + scaled preview.
+        canvas.style.overflow = 'visible';
         await waitCertImages();
         const out = await html2canvas(canvas, {
             scale: 2,
             useCORS: true,
             allowTaint: false,
-            backgroundColor: null,
+            backgroundColor: '#faf8f4',
             logging: false,
             width: CERT_W,
-            height: CERT_H
+            height: CERT_H,
+            windowWidth: CERT_W,
+            windowHeight: CERT_H,
+            x: 0,
+            y: 0,
+            scrollX: 0,
+            scrollY: 0,
+            onclone: function (doc) {
+                const clone = doc.getElementById('certCanvas');
+                if (clone) {
+                    clone.style.transform = 'none';
+                    clone.style.overflow = 'visible';
+                }
+                const sign = doc.getElementById('cert_sign_block');
+                if (sign) {
+                    sign.style.display = 'block';
+                    sign.style.visibility = 'visible';
+                    sign.style.opacity = '1';
+                    sign.style.zIndex = '5';
+                    sign.style.bottom = '10.5%';
+                    sign.style.right = '6.5%';
+                    sign.style.width = '24%';
+                    sign.style.color = '#1a2d5a';
+                }
+                const show = doc.getElementById('f_qr_show');
+                const qrImg = doc.getElementById('cert_qr_img');
+                const qrOk = show && show.checked && qrImg && (qrImg.getAttribute('src') || '').trim();
+                const box = doc.getElementById('cert_qr_box');
+                const label = doc.getElementById('v_qr_scan_label');
+                if (box) box.style.display = qrOk ? '' : 'none';
+                if (label) label.style.display = qrOk ? '' : 'none';
+            }
         });
         canvas.style.transform = prevTransform;
+        canvas.style.overflow = prevOverflow || '';
         return out;
     }
 

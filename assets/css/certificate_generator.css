@@ -316,20 +316,29 @@
 /* —— Signatory (bottom right) —— */
 .cert-sign-block {
     position: absolute;
-    bottom: 9%;
+    bottom: 10.5%;
     right: 6.5%;
-    width: 22%;
+    width: 24%;
     text-align: center;
     background: transparent;
     box-shadow: none;
     padding: 0;
     margin: 0;
+    z-index: 5;
+    overflow: visible;
+    color: #1a2d5a;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
 }
 
 .cert-sign-line {
-    border-bottom: 1px solid #1a2d5a;
-    height: 32px;
+    border-bottom: 1.5px solid #1a2d5a;
+    height: 28px;
+    min-height: 28px;
+    line-height: 28px;
     margin-bottom: 4px;
+    color: transparent;
+    font-size: 1px;
 }
 
 .cert-sign-title {
@@ -337,6 +346,7 @@
     font-size: 0.9em;
     margin: 0;
     color: #1a2d5a;
+    line-height: 1.25;
 }
 
 .cert-sign-uni {
