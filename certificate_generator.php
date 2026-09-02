@@ -137,8 +137,8 @@ if ($seal_glob && is_file($seal_glob[0])) {
     $seal_path = 'uploads/certificates/' . basename($seal_glob[0]);
 }
 $defaults['seal_url'] = $seal_path;
-// Custom brand_seal is usually a signature/stamp image — show it by default when present.
-$defaults['seal_show'] = ($seal_glob && is_file($seal_glob[0]));
+// Signature image is opt-in — toggle starts off until the admin enables it.
+$defaults['seal_show'] = false;
 $defaults['signatory_location'] = 'Hyderabad, Telangana, India';
 
 $cert_template_path = 'assets/images/certificate_template.jpeg';
@@ -1164,7 +1164,8 @@ function cert_achievement_phrase(string $key): string
         }
     }
 
-    function setSealSrc(url) {
+    function setSealSrc(url, opts) {
+        opts = opts || {};
         const img = document.getElementById('cert_seal_img');
         const preview = document.getElementById('sealFormPreview');
         const urlInput = document.getElementById('f_seal_url');
@@ -1184,8 +1185,8 @@ function cert_achievement_phrase(string $key): string
             if (urlInput && !u.startsWith('data:') && urlInput.value.trim() !== u.split('?')[0]) {
                 urlInput.value = u.split('?')[0];
             }
-            // Uploading / setting a signature should turn the overlay on.
-            if (showToggle) showToggle.checked = true;
+            // Only turn the overlay on when explicitly requested (e.g. user upload).
+            if (opts.show === true && showToggle) showToggle.checked = true;
             fitCertPreview();
         } else {
             img.removeAttribute('src');
@@ -1217,8 +1218,7 @@ function cert_achievement_phrase(string $key): string
         }
         const reader = new FileReader();
         reader.onload = function () {
-            document.getElementById('f_seal_show').checked = true;
-            setSealSrc(reader.result);
+            setSealSrc(reader.result, { show: true });
             document.getElementById('f_seal_url').value = '';
         };
         reader.readAsDataURL(file);
@@ -1227,7 +1227,7 @@ function cert_achievement_phrase(string $key): string
     document.getElementById('btnSealReset').addEventListener('click', function () {
         document.getElementById('f_seal_file').value = '';
         document.getElementById('f_seal_url').value = FALLBACK_SEAL_URL;
-        document.getElementById('f_seal_show').checked = true;
+        document.getElementById('f_seal_show').checked = false;
         setSealSrc(FALLBACK_SEAL_URL);
         localStorage.removeItem(SEAL_STORAGE_KEY);
     });
@@ -1244,8 +1244,7 @@ function cert_achievement_phrase(string $key): string
             .then(r => r.json())
             .then(data => {
                 if (data.status === 'success') {
-                    document.getElementById('f_seal_show').checked = true;
-                    setSealSrc(data.seal_url);
+                    setSealSrc(data.seal_url, { show: true });
                     document.getElementById('f_seal_url').value = data.seal_url.split('?')[0];
                     Swal.fire('Saved', data.message, 'success');
                 } else {
@@ -1627,6 +1626,13 @@ function cert_achievement_phrase(string $key): string
             } else if (DEFAULT_SEAL_URL) {
                 setSealSrc(DEFAULT_SEAL_URL);
             }
+            // Re-apply saved toggle after setSealSrc so it stays off by default / as saved.
+            if (o && o.f_seal_show !== undefined) {
+                document.getElementById('f_seal_show').checked = !!o.f_seal_show;
+            } else {
+                document.getElementById('f_seal_show').checked = false;
+            }
+            applySealVisibility();
         } catch (e) { /* ignore */ }
     }
 
