@@ -441,8 +441,8 @@ function cert_achievement_phrase(string $key): string
                     <span class="text-muted" id="previewFitHint">Auto-fits to panel</span>
                 </div>
                 <div class="cert-gen-preview-viewport" id="previewViewport">
-                    <div class="cert-gen-preview-scaler" id="previewScaler" style="width:<?php echo (int) max(200, (int) round($cert_canvas_w * 0.55)); ?>px;height:<?php echo (int) max(140, (int) round($cert_canvas_h * 0.55)); ?>px;">
-                    <div class="cert-gen-preview-zoom" id="previewZoom" style="width:<?php echo (int) $cert_canvas_w; ?>px;height:<?php echo (int) $cert_canvas_h; ?>px;">
+                    <div class="cert-gen-preview-scaler" id="previewScaler" style="width:<?php echo (int) max(200, (int) round($cert_canvas_w * 0.4)); ?>px;height:<?php echo (int) max(140, (int) round($cert_canvas_h * 0.4)); ?>px;">
+                    <div class="cert-gen-preview-zoom" id="previewZoom" style="width:<?php echo (int) $cert_canvas_w; ?>px;height:<?php echo (int) $cert_canvas_h; ?>px;transform:scale(0.4);transform-origin:0 0;">
                     <div id="certCanvas" class="cert-canvas" style="width:<?php echo (int) $cert_canvas_w; ?>px;height:<?php echo (int) $cert_canvas_h; ?>px;font-size:<?php echo (int) $cert_font_base; ?>px;">
                         <img class="cert-bg-img" src="<?php echo htmlspecialchars($cert_template_path); ?>" alt="" crossorigin="anonymous">
                         <div class="cert-overlay">
@@ -569,32 +569,48 @@ function cert_achievement_phrase(string $key): string
         const canvas = document.getElementById('certCanvas');
         if (!viewport || !scaler || !canvas) return;
 
+        const vr = viewport.getBoundingClientRect();
         const pad = 24;
-        const availW = Math.max(180, viewport.clientWidth - pad);
-        const availH = Math.max(180, viewport.clientHeight - pad);
-        let scale = Math.min(availW / CERT_W, availH / CERT_H, 1);
-        if (!isFinite(scale) || scale <= 0) {
-            scale = 0.45;
-        }
+        const availW = Math.max(100, vr.width - pad);
+        const availH = Math.max(100, vr.height - pad);
 
-        const w = Math.max(1, Math.floor(CERT_W * scale));
-        const h = Math.max(1, Math.floor(CERT_H * scale));
+        let scale = Math.min(availW / CERT_W, availH / CERT_H);
+        if (!isFinite(scale) || scale <= 0) {
+            scale = 0.35;
+        }
+        // Never upscale above 100%; always shrink to fit the visible panel.
+        scale = Math.min(scale, 1);
+
+        const w = Math.max(1, Math.round(CERT_W * scale));
+        const h = Math.max(1, Math.round(CERT_H * scale));
+
         scaler.style.width = w + 'px';
         scaler.style.height = h + 'px';
+        scaler.style.overflow = 'hidden';
+        scaler.style.position = 'relative';
 
-        // Scale the zoom wrapper — keep #certCanvas untransformed for reliable export.
+        // Prefer scaling #previewZoom (export leaves #certCanvas unscaled).
         if (zoom) {
+            zoom.style.position = 'absolute';
+            zoom.style.top = '0';
+            zoom.style.left = '0';
             zoom.style.width = CERT_W + 'px';
             zoom.style.height = CERT_H + 'px';
+            zoom.style.transformOrigin = '0 0';
             zoom.style.transform = 'scale(' + scale + ')';
-            zoom.style.transformOrigin = 'top left';
+            canvas.style.transform = 'none';
+            canvas.style.zoom = '';
+        } else {
+            // Fallback if zoom wrapper missing
+            canvas.style.transformOrigin = '0 0';
+            canvas.style.transform = 'scale(' + scale + ')';
         }
-        canvas.style.transform = '';
+
         canvas.dataset.previewScale = String(scale);
 
         const hint = document.getElementById('previewFitHint');
         if (hint) {
-            hint.textContent = 'Auto-fits to panel (' + Math.round(scale * 100) + '%)';
+            hint.textContent = 'Fits screen · ' + Math.round(scale * 100) + '%';
         }
     }
 
@@ -1560,21 +1576,38 @@ function cert_achievement_phrase(string $key): string
     syncAchievement();
     syncParticipantNamePreview();
     fitCertPreview();
-    // Re-fit after layout settles (fonts/images/sidebar).
     requestAnimationFrame(function () {
         fitCertPreview();
-        setTimeout(fitCertPreview, 100);
-        setTimeout(fitCertPreview, 400);
+        requestAnimationFrame(fitCertPreview);
     });
+    window.addEventListener('load', fitCertPreview);
     window.addEventListener('resize', fitCertPreview);
     if (typeof ResizeObserver !== 'undefined') {
-        const ro = new ResizeObserver(function () {
-            fitCertPreview();
-        });
+        let fitScheduled = false;
+        const scheduleFit = function () {
+            if (fitScheduled) return;
+            fitScheduled = true;
+            requestAnimationFrame(function () {
+                fitScheduled = false;
+                fitCertPreview();
+            });
+        };
+        const ro = new ResizeObserver(scheduleFit);
         const vp = document.getElementById('previewViewport');
         if (vp) ro.observe(vp);
+        const col = document.querySelector('.cert-gen-preview-col');
+        if (col) ro.observe(col);
         const shell = document.querySelector('.cert-gen-shell');
         if (shell) ro.observe(shell);
+    }
+    // After template/bg image loads, re-fit once more.
+    const bg = document.querySelector('#certCanvas .cert-bg-img');
+    if (bg) {
+        if (bg.complete) {
+            setTimeout(fitCertPreview, 50);
+        } else {
+            bg.addEventListener('load', function () { fitCertPreview(); });
+        }
     }
     updateLinkHint();
     updateSaveButton();

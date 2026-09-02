@@ -189,14 +189,16 @@
 
 .cert-gen-preview-viewport {
     flex: 1 1 auto;
-    min-height: 320px;
-    max-height: calc(100vh - 160px);
+    min-height: 280px;
+    height: calc(100vh - 168px);
+    max-height: calc(100vh - 168px);
     overflow: hidden;
     background: #e8ecf1;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0.75rem;
+    padding: 12px;
+    box-sizing: border-box;
 }
 
 .cert-gen-preview-scaler {
@@ -208,18 +210,19 @@
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
 }
 
+/* Absolutely positioned so full cert size never expands the panel / breaks scale math */
 .cert-gen-preview-zoom {
-    transform-origin: top left;
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
     will-change: transform;
 }
 
 .cert-gen-preview-viewport #certCanvas {
     position: relative;
-    top: auto;
-    left: auto;
     margin: 0;
     box-shadow: none;
-    transform: none !important; /* preview scale is on #previewZoom only */
 }
 
 .cert-page-wrap.cert-print-area {
@@ -251,6 +254,7 @@
         transform: none !important;
         width: auto !important;
         height: auto !important;
+        position: static !important;
     }
     #certCanvas {
         position: static !important;
