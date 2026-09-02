@@ -28,6 +28,65 @@ try {
         exit();
     }
 
+    $action = strtolower(trim((string) ($data['action'] ?? ($_GET['action'] ?? ''))));
+    if ($action === 'leave' || $action === 'cancel') {
+        require_once __DIR__ . '/registration_leave_helper.php';
+        $event_id = (int) ($data['event_id'] ?? 0);
+        $user_id = (int) ($data['user_id'] ?? 0);
+        $v = registration_leave_validate_user_event($conn, $event_id, $user_id);
+        if (!$v['ok']) {
+            http_response_code((int) ($v['http'] ?? 400));
+            echo json_encode(["status" => "error", "message" => $v['message']]);
+            exit();
+        }
+
+        // Leave allowed after registration deadline (join is not).
+        // Block leave if already recorded as a winner for this event.
+        $win = @$conn->query("SELECT 1 FROM event_winners WHERE event_id = $event_id AND user_id = $user_id LIMIT 1");
+        if ($win && $win->num_rows > 0) {
+            http_response_code(400);
+            echo json_encode(["status" => "error", "message" => "Cannot leave: you are recorded as a winner for this event"]);
+            exit();
+        }
+
+        $chk = $conn->prepare("SELECT id FROM participant WHERE user_id = ? AND event_id = ? AND status = 'active' LIMIT 1");
+        $chk->bind_param("ii", $user_id, $event_id);
+        $chk->execute();
+        if ($chk->get_result()->num_rows === 0) {
+            $chk->close();
+            http_response_code(400);
+            echo json_encode(["status" => "error", "message" => "You are not a participant for this event"]);
+            exit();
+        }
+        $chk->close();
+
+        // Hard delete so unique (event_id, user_id) allows rejoin later.
+        $del = $conn->prepare("DELETE FROM participant WHERE user_id = ? AND event_id = ? AND status = 'active'");
+        $del->bind_param("ii", $user_id, $event_id);
+        if (!$del->execute() || $del->affected_rows < 1) {
+            $del->close();
+            http_response_code(500);
+            echo json_encode(["status" => "error", "message" => "Failed to leave as participant"]);
+            exit();
+        }
+        $del->close();
+
+        registration_log_action($conn, $event_id, $user_id, 'participating', 'left', 'User left as participant');
+        $counts = registration_event_counts($conn, $event_id);
+        echo json_encode([
+            "status" => "success",
+            "message" => "Left event",
+            "event_id" => $event_id,
+            "server_time" => api_server_time_iso(),
+            "attendee_count" => $counts['attendee_count'],
+            "volunteer_count" => $counts['volunteer_count'],
+            "participant_count" => $counts['participant_count'],
+            "viewer_count" => $counts['viewer_count'],
+            "event" => array_merge(['id' => $event_id], $counts),
+        ]);
+        exit();
+    }
+
     if (!isset($data['event_id'], $data['user_id'], $data['department_class'])) {
         http_response_code(400);
         echo json_encode(["status" => "error", "message" => "event_id, user_id, and department_class are required"]);
@@ -190,11 +249,18 @@ try {
             $att_del->execute();
             $att_del->close();
         }
+        require_once __DIR__ . '/registration_leave_helper.php';
+        $counts = registration_event_counts($conn, $event_id);
         http_response_code(200);
         echo json_encode([
             "status" => "success", 
             "message" => "You have been registered as a participant",
-            "participant_id" => $new_participant_id
+            "participant_id" => $new_participant_id,
+            "server_time" => api_server_time_iso(),
+            "attendee_count" => $counts['attendee_count'],
+            "volunteer_count" => $counts['volunteer_count'],
+            "participant_count" => $counts['participant_count'],
+            "viewer_count" => $counts['viewer_count'],
         ]);
     } else {
         http_response_code(500);

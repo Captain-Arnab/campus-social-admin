@@ -27,6 +27,56 @@ try {
         event_staff_switch_role($conn, $data);
         exit();
     }
+
+    $action = strtolower(trim((string) ($data['action'] ?? ($_GET['action'] ?? ''))));
+    if ($action === 'leave' || $action === 'cancel') {
+        require_once __DIR__ . '/registration_leave_helper.php';
+        $event_id = (int) ($data['event_id'] ?? 0);
+        $user_id = (int) ($data['user_id'] ?? 0);
+        $v = registration_leave_validate_user_event($conn, $event_id, $user_id);
+        if (!$v['ok']) {
+            http_response_code((int) ($v['http'] ?? 400));
+            echo json_encode(["status" => "error", "message" => $v['message']]);
+            exit();
+        }
+
+        // Leave allowed after registration deadline (join is not).
+        $chk = $conn->prepare("SELECT id FROM volunteers WHERE user_id = ? AND event_id = ? AND status = 'active' LIMIT 1");
+        $chk->bind_param("ii", $user_id, $event_id);
+        $chk->execute();
+        if ($chk->get_result()->num_rows === 0) {
+            $chk->close();
+            http_response_code(400);
+            echo json_encode(["status" => "error", "message" => "You are not volunteering for this event"]);
+            exit();
+        }
+        $chk->close();
+
+        $del = $conn->prepare("DELETE FROM volunteers WHERE user_id = ? AND event_id = ? AND status = 'active'");
+        $del->bind_param("ii", $user_id, $event_id);
+        if (!$del->execute() || $del->affected_rows < 1) {
+            $del->close();
+            http_response_code(500);
+            echo json_encode(["status" => "error", "message" => "Failed to leave as volunteer"]);
+            exit();
+        }
+        $del->close();
+
+        registration_log_action($conn, $event_id, $user_id, 'volunteering', 'left', 'User left as volunteer');
+        $counts = registration_event_counts($conn, $event_id);
+        echo json_encode([
+            "status" => "success",
+            "message" => "Left event",
+            "event_id" => $event_id,
+            "server_time" => api_server_time_iso(),
+            "attendee_count" => $counts['attendee_count'],
+            "volunteer_count" => $counts['volunteer_count'],
+            "participant_count" => $counts['participant_count'],
+            "viewer_count" => $counts['viewer_count'],
+            "event" => array_merge(['id' => $event_id], $counts),
+        ]);
+        exit();
+    }
     
     // Validate required parameters
     $required = ['event_id', 'user_id', 'role'];
@@ -186,11 +236,18 @@ try {
             $att_del->execute();
             $att_del->close();
         }
+        require_once __DIR__ . '/registration_leave_helper.php';
+        $counts = registration_event_counts($conn, $event_id);
         http_response_code(200);
         echo json_encode([
             "status" => "success", 
             "message" => "You have been registered as a volunteer",
-            "volunteer_id" => $new_volunteer_id
+            "volunteer_id" => $new_volunteer_id,
+            "server_time" => api_server_time_iso(),
+            "attendee_count" => $counts['attendee_count'],
+            "volunteer_count" => $counts['volunteer_count'],
+            "participant_count" => $counts['participant_count'],
+            "viewer_count" => $counts['viewer_count'],
         ]);
     } else {
         http_response_code(500);

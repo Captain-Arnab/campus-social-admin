@@ -4,6 +4,7 @@ require_once __DIR__ . '/sms_helper.php';
 require_once __DIR__ . '/background_jobs_helper.php';
 require_once __DIR__ . '/../event_date_range_schema.php';
 require_once __DIR__ . '/admin_public_url.php';
+require_once __DIR__ . '/registration_leave_helper.php';
 $method = $_SERVER['REQUEST_METHOD'];
 
 /**
@@ -237,7 +238,7 @@ if ($method == 'GET') {
             events_api_enrich_event_row($row);
             $data[] = $row;
         }
-        echo json_encode(["status" => "success", "count" => count($data), "data" => $data]);
+        echo json_encode(["status" => "success", "count" => count($data), "server_time" => api_server_time_iso(), "data" => $data]);
         exit();
     } elseif ($view == 'volunteering' && $user_id > 0) {
         // Get events the user is volunteering for
@@ -259,7 +260,7 @@ if ($method == 'GET') {
             events_api_enrich_event_row($row);
             $data[] = $row;
         }
-        echo json_encode(["status" => "success", "count" => count($data), "data" => $data]);
+        echo json_encode(["status" => "success", "count" => count($data), "server_time" => api_server_time_iso(), "data" => $data]);
         exit();
     } elseif ($view == 'participating' && $user_id > 0) {
         // Get events the user is participating in
@@ -281,7 +282,7 @@ if ($method == 'GET') {
             events_api_enrich_event_row($row);
             $data[] = $row;
         }
-        echo json_encode(["status" => "success", "count" => count($data), "data" => $data]);
+        echo json_encode(["status" => "success", "count" => count($data), "server_time" => api_server_time_iso(), "data" => $data]);
         exit();
     } elseif ($view == 'hosted' && $user_id > 0) {
         // Get events the user is hosting
@@ -302,7 +303,7 @@ if ($method == 'GET') {
             events_api_enrich_event_row($row);
             $data[] = $row;
         }
-        echo json_encode(["status" => "success", "count" => count($data), "data" => $data]);
+        echo json_encode(["status" => "success", "count" => count($data), "server_time" => api_server_time_iso(), "data" => $data]);
         exit();
     } elseif ($view == 'hosted_all' && $user_id > 0) {
         // Get all events the user is hosting (including pending/hold)
@@ -323,7 +324,7 @@ if ($method == 'GET') {
             events_api_enrich_event_row($row);
             $data[] = $row;
         }
-        echo json_encode(["status" => "success", "count" => count($data), "data" => $data]);
+        echo json_encode(["status" => "success", "count" => count($data), "server_time" => api_server_time_iso(), "data" => $data]);
         exit();
     } else {
         // Live or past events (default behavior)
@@ -430,7 +431,7 @@ if ($method == 'GET') {
     if ($id > 0 && empty($data)) {
         echo json_encode(["status" => "error", "message" => "Event pawa jayni"]);
     } else {
-        echo json_encode(["status" => "success", "count" => count($data), "data" => ($id > 0) ? $data[0] : $data]);
+        echo json_encode(["status" => "success", "count" => count($data), "server_time" => api_server_time_iso(), "data" => ($id > 0) ? $data[0] : $data]);
     }
 }
 
