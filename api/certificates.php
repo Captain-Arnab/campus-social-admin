@@ -63,6 +63,22 @@ function certificate_file_exists($file_path) {
 $method = $_SERVER['REQUEST_METHOD'];
 
 if ($method === 'POST') {
+    // Generate All is admin-panel only (browser-based rendering). Not for Flutter.
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        session_start();
+    }
+    require_once __DIR__ . '/../admin_priv.php';
+    if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
+        http_response_code(401);
+        echo json_encode(['status' => 'error', 'message' => 'Unauthorized — admin session required']);
+        exit();
+    }
+    if (!has_priv('certificates')) {
+        http_response_code(403);
+        echo json_encode(['status' => 'error', 'message' => 'Forbidden']);
+        exit();
+    }
+
     require_once __DIR__ . '/background_jobs_helper.php';
     $data = json_decode(file_get_contents('php://input'), true);
     if (!is_array($data)) {
