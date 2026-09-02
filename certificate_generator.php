@@ -437,7 +437,7 @@ function cert_achievement_phrase(string $key): string
             <div class="cert-gen-preview-card cert-print-area">
                 <div class="cert-gen-preview-toolbar">
                     <span><i class="fas fa-eye me-1"></i> Live preview</span>
-                    <span class="text-muted">Fits to panel — scroll if zoomed in</span>
+                    <span class="text-muted" id="previewFitHint">Auto-fits to panel</span>
                 </div>
                 <div class="cert-gen-preview-viewport" id="previewViewport">
                     <div class="cert-gen-preview-scaler" id="previewScaler">
@@ -564,13 +564,27 @@ function cert_achievement_phrase(string $key): string
         const scaler = document.getElementById('previewScaler');
         const canvas = document.getElementById('certCanvas');
         if (!viewport || !scaler || !canvas) return;
-        const pad = 16;
-        const availW = Math.max(200, viewport.clientWidth - pad * 2);
-        const availH = Math.max(200, viewport.clientHeight - pad * 2);
-        const scale = Math.min(availW / CERT_W, availH / CERT_H, 1);
-        scaler.style.width = Math.floor(CERT_W * scale) + 'px';
-        scaler.style.height = Math.floor(CERT_H * scale) + 'px';
+
+        // Temporarily clear size so clientWidth/Height reflect true panel space
+        // (avoids measuring while old scrollbars eat space).
+        scaler.style.width = '0px';
+        scaler.style.height = '0px';
+
+        const pad = 20;
+        const availW = Math.max(160, viewport.clientWidth - pad);
+        const availH = Math.max(160, viewport.clientHeight - pad);
+        // Always scale down to fit; never require browser zoom.
+        let scale = Math.min(availW / CERT_W, availH / CERT_H);
+        if (!isFinite(scale) || scale <= 0) scale = 0.25;
+        // Keep a tiny margin so edges aren't clipped by rounding.
+        scale = Math.min(scale, 1) * 0.98;
+
+        const w = Math.max(1, Math.floor(CERT_W * scale));
+        const h = Math.max(1, Math.floor(CERT_H * scale));
+        scaler.style.width = w + 'px';
+        scaler.style.height = h + 'px';
         canvas.style.transform = 'scale(' + scale + ')';
+        canvas.dataset.previewScale = String(scale);
     }
 
     const $eventSelect = $('#f_event_select');
@@ -1528,11 +1542,21 @@ function cert_achievement_phrase(string $key): string
     syncAchievement();
     syncParticipantNamePreview();
     fitCertPreview();
+    // Re-fit after layout settles (fonts/images/sidebar).
+    requestAnimationFrame(function () {
+        fitCertPreview();
+        setTimeout(fitCertPreview, 100);
+        setTimeout(fitCertPreview, 400);
+    });
     window.addEventListener('resize', fitCertPreview);
     if (typeof ResizeObserver !== 'undefined') {
-        const ro = new ResizeObserver(fitCertPreview);
+        const ro = new ResizeObserver(function () {
+            fitCertPreview();
+        });
         const vp = document.getElementById('previewViewport');
         if (vp) ro.observe(vp);
+        const shell = document.querySelector('.cert-gen-shell');
+        if (shell) ro.observe(shell);
     }
     updateLinkHint();
     updateSaveButton();

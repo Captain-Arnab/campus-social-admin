@@ -189,22 +189,28 @@
 
 .cert-gen-preview-viewport {
     flex: 1 1 auto;
-    min-height: 380px;
-    max-height: calc(100vh - 180px);
-    overflow: auto;
+    min-height: 320px;
+    max-height: calc(100vh - 160px);
+    overflow: hidden; /* scaled preview must fit without page scrollbars */
     background: #e8ecf1;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: center;
-    padding: 1rem;
+    padding: 0.75rem;
 }
 
 .cert-gen-preview-scaler {
     position: relative;
     flex-shrink: 0;
+    overflow: hidden; /* clip unscaled canvas layout box after CSS transform */
+    line-height: 0;
+    background: transparent;
 }
 
 .cert-gen-preview-viewport #certCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
     margin: 0;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
     transform-origin: top left;
@@ -226,12 +232,16 @@
         overflow: visible;
         padding: 0;
         background: #fff;
+        display: block;
     }
     .cert-gen-preview-scaler {
         width: auto !important;
         height: auto !important;
+        overflow: visible !important;
+        position: static !important;
     }
     #certCanvas {
+        position: static !important;
         transform: none !important;
         box-shadow: none;
     }
