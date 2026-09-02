@@ -493,7 +493,10 @@ function cert_achievement_phrase(string $key): string
                             <div class="cert-date-block" id="cert_date_block">
                                 <div class="cert-date-row">
                                     <i class="far fa-calendar-alt cert-date-icon" aria-hidden="true"></i>
-                                    <div class="cert-date-val" id="v_certificate_date"><?php echo htmlspecialchars($defaults['certificate_date']); ?></div>
+                                    <div class="cert-date-text">
+                                        <div class="cert-date-val" id="v_certificate_date"><?php echo htmlspecialchars($defaults['certificate_date']); ?></div>
+                                        <div class="cert-date-line" aria-hidden="true"></div>
+                                    </div>
                                 </div>
                             </div>
 
