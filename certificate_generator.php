@@ -137,7 +137,8 @@ if ($seal_glob && is_file($seal_glob[0])) {
     $seal_path = 'uploads/certificates/' . basename($seal_glob[0]);
 }
 $defaults['seal_url'] = $seal_path;
-$defaults['seal_show'] = false;
+// Custom brand_seal is usually a signature/stamp image — show it by default when present.
+$defaults['seal_show'] = ($seal_glob && is_file($seal_glob[0]));
 $defaults['signatory_location'] = 'Hyderabad, Telangana, India';
 
 $cert_template_path = 'assets/images/certificate_template.jpeg';
@@ -386,15 +387,15 @@ function cert_achievement_phrase(string $key): string
                                     <input type="text" class="form-control form-control-sm cert-field" id="f_signatory_location" value="<?php echo htmlspecialchars($defaults['signatory_location']); ?>" placeholder="Hyderabad, Telangana, India">
                                     <div class="form-text">Kept on white area — avoids overlap with corner graphic.</div>
                                 </div>
-                                <p class="small fw-bold text-muted mb-2 mt-2">Optional seal overlay</p>
-                                <div class="form-text mb-2">Template already includes the gold seal. Enable only to replace it.</div>
+                                <p class="small fw-bold text-muted mb-2 mt-2">Signature / seal image</p>
+                                <div class="form-text mb-2">Handwritten signature or stamp image (uploads/certificates/brand_seal.*). Text under the line (Registrar / university) always shows.</div>
                                 <div class="cert-gen-media-row">
                                     <div id="sealFormPreviewWrap" class="cert-gen-thumb d-flex align-items-center justify-content-center bg-white p-1">
                                         <img id="sealFormPreview" src="<?php echo htmlspecialchars($seal_path); ?>" alt="" style="width:44px;height:44px;object-fit:contain;">
                                     </div>
                                     <div class="form-check form-switch mb-0">
                                         <input class="form-check-input" type="checkbox" id="f_seal_show" <?php echo $defaults['seal_show'] ? 'checked' : ''; ?>>
-                                        <label class="form-check-label small" for="f_seal_show">Show seal</label>
+                                        <label class="form-check-label small" for="f_seal_show">Show signature image</label>
                                     </div>
                                 </div>
                                 <div class="cert-gen-field">
@@ -440,7 +441,8 @@ function cert_achievement_phrase(string $key): string
                     <span class="text-muted" id="previewFitHint">Auto-fits to panel</span>
                 </div>
                 <div class="cert-gen-preview-viewport" id="previewViewport">
-                    <div class="cert-gen-preview-scaler" id="previewScaler">
+                    <div class="cert-gen-preview-scaler" id="previewScaler" style="width:<?php echo (int) max(200, (int) round($cert_canvas_w * 0.55)); ?>px;height:<?php echo (int) max(140, (int) round($cert_canvas_h * 0.55)); ?>px;">
+                    <div class="cert-gen-preview-zoom" id="previewZoom" style="width:<?php echo (int) $cert_canvas_w; ?>px;height:<?php echo (int) $cert_canvas_h; ?>px;">
                     <div id="certCanvas" class="cert-canvas" style="width:<?php echo (int) $cert_canvas_w; ?>px;height:<?php echo (int) $cert_canvas_h; ?>px;font-size:<?php echo (int) $cert_font_base; ?>px;">
                         <img class="cert-bg-img" src="<?php echo htmlspecialchars($cert_template_path); ?>" alt="" crossorigin="anonymous">
                         <div class="cert-overlay">
@@ -509,6 +511,7 @@ function cert_achievement_phrase(string $key): string
                         </div>
                     </div>
                     </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -562,29 +565,37 @@ function cert_achievement_phrase(string $key): string
     function fitCertPreview() {
         const viewport = document.getElementById('previewViewport');
         const scaler = document.getElementById('previewScaler');
+        const zoom = document.getElementById('previewZoom');
         const canvas = document.getElementById('certCanvas');
         if (!viewport || !scaler || !canvas) return;
 
-        // Temporarily clear size so clientWidth/Height reflect true panel space
-        // (avoids measuring while old scrollbars eat space).
-        scaler.style.width = '0px';
-        scaler.style.height = '0px';
-
-        const pad = 20;
-        const availW = Math.max(160, viewport.clientWidth - pad);
-        const availH = Math.max(160, viewport.clientHeight - pad);
-        // Always scale down to fit; never require browser zoom.
-        let scale = Math.min(availW / CERT_W, availH / CERT_H);
-        if (!isFinite(scale) || scale <= 0) scale = 0.25;
-        // Keep a tiny margin so edges aren't clipped by rounding.
-        scale = Math.min(scale, 1) * 0.98;
+        const pad = 24;
+        const availW = Math.max(180, viewport.clientWidth - pad);
+        const availH = Math.max(180, viewport.clientHeight - pad);
+        let scale = Math.min(availW / CERT_W, availH / CERT_H, 1);
+        if (!isFinite(scale) || scale <= 0) {
+            scale = 0.45;
+        }
 
         const w = Math.max(1, Math.floor(CERT_W * scale));
         const h = Math.max(1, Math.floor(CERT_H * scale));
         scaler.style.width = w + 'px';
         scaler.style.height = h + 'px';
-        canvas.style.transform = 'scale(' + scale + ')';
+
+        // Scale the zoom wrapper — keep #certCanvas untransformed for reliable export.
+        if (zoom) {
+            zoom.style.width = CERT_W + 'px';
+            zoom.style.height = CERT_H + 'px';
+            zoom.style.transform = 'scale(' + scale + ')';
+            zoom.style.transformOrigin = 'top left';
+        }
+        canvas.style.transform = '';
         canvas.dataset.previewScale = String(scale);
+
+        const hint = document.getElementById('previewFitHint');
+        if (hint) {
+            hint.textContent = 'Auto-fits to panel (' + Math.round(scale * 100) + '%)';
+        }
     }
 
     const $eventSelect = $('#f_event_select');
@@ -1265,10 +1276,13 @@ function cert_achievement_phrase(string $key): string
     async function renderCanvas() {
         applyQrVisibility();
         const canvas = document.getElementById('certCanvas');
+        const zoom = document.getElementById('previewZoom');
+        const prevZoomTransform = zoom ? zoom.style.transform : '';
         const prevTransform = canvas.style.transform;
         const prevOverflow = canvas.style.overflow;
+        // Export at full size: clear preview zoom on wrapper + canvas.
+        if (zoom) zoom.style.transform = 'none';
         canvas.style.transform = 'none';
-        // html2canvas clips absolute footer overlays when overflow:hidden + scaled preview.
         canvas.style.overflow = 'visible';
         await waitCertImages();
         const out = await html2canvas(canvas, {
@@ -1290,7 +1304,10 @@ function cert_achievement_phrase(string $key): string
                 if (clone) {
                     clone.style.transform = 'none';
                     clone.style.overflow = 'visible';
+                    clone.style.position = 'relative';
                 }
+                const z = doc.getElementById('previewZoom');
+                if (z) z.style.transform = 'none';
                 const sign = doc.getElementById('cert_sign_block');
                 if (sign) {
                     sign.style.display = 'block';
@@ -1311,6 +1328,7 @@ function cert_achievement_phrase(string $key): string
                 if (label) label.style.display = qrOk ? '' : 'none';
             }
         });
+        if (zoom) zoom.style.transform = prevZoomTransform;
         canvas.style.transform = prevTransform;
         canvas.style.overflow = prevOverflow || '';
         return out;
