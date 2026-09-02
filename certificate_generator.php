@@ -193,8 +193,8 @@ function cert_achievement_phrase(string $key): string
     <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/css/select2.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css" rel="stylesheet">
-    <link href="assets/css/certificate_generator.css" rel="stylesheet">
-    <link href="assets/css/certificate_generator_layout.css" rel="stylesheet">
+    <link href="assets/css/certificate_generator.css?v=<?php echo (int) @filemtime(__DIR__ . '/assets/css/certificate_generator.css'); ?>" rel="stylesheet">
+    <link href="assets/css/certificate_generator_layout.css?v=<?php echo (int) @filemtime(__DIR__ . '/assets/css/certificate_generator_layout.css'); ?>" rel="stylesheet">
     <style>
         body { font-family: 'Plus Jakarta Sans', sans-serif; background: #f8f9fd; }
         .main-content { margin-left: 280px; padding: 20px 24px; box-sizing: border-box; max-width: 100%; }
@@ -1138,11 +1138,26 @@ function cert_achievement_phrase(string $key): string
         const sealPart = document.getElementById('cert_seal_wrap');
         const img = document.getElementById('cert_seal_img');
         const has = img && (img.getAttribute('src') || '').trim();
+        const on = !!(show && has);
         if (sealPart) {
-            sealPart.style.display = (show && has) ? 'block' : 'none';
+            sealPart.style.display = on ? 'block' : 'none';
+            sealPart.style.width = '85%';
+            sealPart.style.maxWidth = '150px';
+            sealPart.style.height = '48px';
+            sealPart.style.maxHeight = '48px';
+            sealPart.style.overflow = 'hidden';
+            sealPart.style.margin = '0 auto 2px';
+            sealPart.style.lineHeight = '0';
         }
         if (img) {
-            img.style.display = (show && has) ? 'block' : 'none';
+            img.style.display = on ? 'block' : 'none';
+            img.style.width = 'auto';
+            img.style.maxWidth = '100%';
+            img.style.height = 'auto';
+            img.style.maxHeight = '48px';
+            img.style.objectFit = 'contain';
+            img.style.objectPosition = 'center bottom';
+            img.style.margin = '0 auto';
         }
     }
 
@@ -1348,9 +1363,34 @@ function cert_achievement_phrase(string $key): string
                     sign.style.opacity = '1';
                     sign.style.zIndex = '5';
                     sign.style.bottom = '10.5%';
-                    sign.style.right = '6.5%';
+                    sign.style.right = '6%';
                     sign.style.width = '24%';
+                    sign.style.maxWidth = '320px';
                     sign.style.color = '#1a2d5a';
+                    sign.style.overflow = 'visible';
+                }
+                const sealWrap = doc.getElementById('cert_seal_wrap');
+                const sealImg = doc.getElementById('cert_seal_img');
+                if (sealWrap && sealWrap.style.display !== 'none') {
+                    sealWrap.style.maxWidth = '150px';
+                    sealWrap.style.height = '48px';
+                    sealWrap.style.maxHeight = '48px';
+                    sealWrap.style.overflow = 'hidden';
+                    sealWrap.style.margin = '0 auto 2px';
+                }
+                if (sealImg && sealImg.style.display !== 'none') {
+                    sealImg.style.maxWidth = '100%';
+                    sealImg.style.maxHeight = '48px';
+                    sealImg.style.width = 'auto';
+                    sealImg.style.height = 'auto';
+                    sealImg.style.objectFit = 'contain';
+                }
+                const dateBlock = doc.getElementById('cert_date_block');
+                if (dateBlock) {
+                    dateBlock.style.bottom = '18%';
+                    dateBlock.style.left = '34%';
+                    dateBlock.style.transform = 'translateX(-50%)';
+                    dateBlock.style.width = '22%';
                 }
                 const show = doc.getElementById('f_qr_show');
                 const qrImg = doc.getElementById('cert_qr_img');

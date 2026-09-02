@@ -263,36 +263,38 @@
     margin-top: 2px;
 }
 
-/* —— Date (left of center trophy; kept clear of ornate border) —— */
+/* —— Date (between QR and center trophy; inside safe margins) —— */
 .cert-date-block {
     position: absolute;
-    bottom: 15.5%;
-    left: 30%;
-    transform: none;
+    bottom: 18%;
+    left: 34%;
+    transform: translateX(-50%);
     text-align: center;
-    width: 24%;
+    width: 22%;
+    max-width: 280px;
     z-index: 4;
     overflow: visible;
+    pointer-events: none;
 }
 
 .cert-date-row {
     display: inline-flex;
     align-items: flex-end;
     justify-content: center;
-    gap: 0.4em;
+    gap: 0.35em;
     max-width: 100%;
 }
 
 .cert-date-icon {
     color: #c9a227;
-    font-size: 1.05em;
+    font-size: 0.95em;
     line-height: 1;
     margin-bottom: 0.15em;
     flex-shrink: 0;
 }
 
 .cert-date-val {
-    font-size: 0.78em;
+    font-size: 0.72em;
     font-weight: 600;
     color: #1a2d5a;
     border-bottom: 1px solid #1a2d5a;
@@ -302,15 +304,17 @@
     padding: 0 4px 2px;
     text-align: center;
     white-space: nowrap;
-    overflow: visible;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* —— Signatory (bottom right) + signature image above the line —— */
 .cert-sign-block {
     position: absolute;
-    bottom: 11%;
-    right: 5.5%;
-    width: 26%;
+    bottom: 10.5%;
+    right: 6%;
+    width: 24%;
+    max-width: 320px;
     text-align: center;
     background: transparent;
     box-shadow: none;
@@ -323,30 +327,39 @@
     print-color-adjust: exact;
 }
 
+/* Cap signature so large PNG uploads cannot blow past the border */
 .cert-sign-img-wrap {
     display: none;
-    width: 100%;
-    max-width: 160px;
-    height: 52px;
+    box-sizing: border-box;
+    width: 85%;
+    max-width: 150px;
+    height: 48px;
+    max-height: 48px;
     margin: 0 auto 2px;
     line-height: 0;
+    overflow: hidden;
+    background: transparent;
 }
 
 .cert-sign-img-wrap img.cert-seal-img,
-.cert-seal-wrap img.cert-seal-img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
+#cert_seal_img.cert-seal-img {
+    box-sizing: border-box;
+    width: auto !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: 48px !important;
+    object-fit: contain !important;
     object-position: center bottom;
-    display: block;
+    display: block !important;
+    margin: 0 auto;
 }
 
 .cert-sign-line {
     border-bottom: 1.5px solid #1a2d5a;
-    height: 8px;
-    min-height: 8px;
-    line-height: 8px;
-    margin-bottom: 4px;
+    height: 6px;
+    min-height: 6px;
+    line-height: 6px;
+    margin-bottom: 3px;
     color: transparent;
     font-size: 1px;
 }
