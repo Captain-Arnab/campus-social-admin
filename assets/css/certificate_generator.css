@@ -436,7 +436,7 @@
 
 @media print {
     @page {
-        size: landscape;
+        size: A4 landscape;
         margin: 0;
     }
 
@@ -448,17 +448,23 @@
         position: absolute;
         left: 0;
         top: 0;
-        width: 100%;
+        width: 297mm;
+        height: 210mm;
         margin: 0;
         padding: 0;
+        overflow: hidden;
     }
 
     /* Must stay relative — overlays are absolute inside the canvas */
     #certCanvas {
         position: relative !important;
         box-shadow: none;
-        margin: 0 auto;
+        margin: 0;
         overflow: hidden !important;
+        width: 1536px !important;
+        height: 1024px !important;
+        transform: scale(min(297mm / 1536px, 210mm / 1024px)) !important;
+        transform-origin: top left !important;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
     }

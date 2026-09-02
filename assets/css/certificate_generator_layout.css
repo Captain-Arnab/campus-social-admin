@@ -233,7 +233,7 @@
 
 @media print {
     @page {
-        size: landscape;
+        size: A4 landscape;
         margin: 0;
     }
 
@@ -241,12 +241,12 @@
         margin: 0 !important;
         padding: 0 !important;
         background: #fff !important;
-        width: 100%;
-        height: 100%;
+        width: 297mm !important;
+        height: 210mm !important;
         overflow: hidden !important;
     }
 
-    /* Hide admin chrome; only certificate prints */
+    /* Hide everything except the certificate */
     body * {
         visibility: hidden !important;
     }
@@ -255,77 +255,74 @@
         visibility: visible !important;
     }
 
+    .sidebar,
+    .nav-link,
     .cert-gen-editor,
     .cert-gen-preview-toolbar,
-    .sidebar,
+    .cert-gen-page-header,
     .navbar,
     nav,
-    aside,
-    header.admin-header,
-    .cert-gen-page-header {
+    aside {
         display: none !important;
         visibility: hidden !important;
     }
 
+    .main-content {
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 297mm !important;
+        height: 210mm !important;
+        max-width: none !important;
+        overflow: hidden !important;
+    }
+
     .cert-gen-shell,
     .cert-gen-preview-col,
-    .cert-gen-preview-card.cert-print-area {
+    .cert-gen-preview-card.cert-print-area,
+    .cert-gen-preview-viewport {
         display: block !important;
         position: static !important;
-        width: 100% !important;
+        width: 297mm !important;
+        height: 210mm !important;
         max-width: none !important;
         max-height: none !important;
-        height: auto !important;
         margin: 0 !important;
         padding: 0 !important;
         border: none !important;
         box-shadow: none !important;
         background: #fff !important;
-        overflow: visible !important;
+        overflow: hidden !important;
     }
 
-    .cert-gen-preview-viewport {
-        display: block !important;
-        max-height: none !important;
-        height: auto !important;
-        overflow: visible !important;
-        padding: 0 !important;
-        background: #fff !important;
-    }
-
-    .cert-gen-preview-scaler {
-        width: auto !important;
-        height: auto !important;
-        overflow: visible !important;
-        position: static !important;
-        box-shadow: none !important;
-        margin: 0 auto !important;
-    }
-
+    .cert-gen-preview-scaler,
     .cert-gen-preview-zoom {
-        transform: none !important;
-        width: auto !important;
-        height: auto !important;
         position: static !important;
+        width: 297mm !important;
+        height: 210mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        box-shadow: none !important;
+        transform: none !important;
+        line-height: 0 !important;
     }
 
-    /* Keep designed size + relative positioning so overlays stay correct.
-       Landscape @page lets the browser fit the page; do not squash to portrait. */
+    /*
+     * Full 1536×1024 canvas scaled to fit A4 landscape (297×210mm).
+     * transform keeps all absolute overlays in the correct place.
+     */
     #certCanvas.cert-canvas,
     #certCanvas {
         position: relative !important;
         display: block !important;
-        margin: 0 auto !important;
+        width: 1536px !important;
+        height: 1024px !important;
+        margin: 0 !important;
         box-shadow: none !important;
-        transform: none !important;
         overflow: hidden !important;
+        transform: scale(min(297mm / 1536px, 210mm / 1024px)) !important;
+        transform-origin: top left !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
-    }
-
-    .cert-page-wrap.cert-print-area {
-        background: transparent !important;
-        padding: 0 !important;
-        overflow: visible !important;
     }
 }

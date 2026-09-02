@@ -1410,41 +1410,86 @@ function cert_achievement_phrase(string $key): string
         return out;
     }
 
+    function buildCertPrintHtml(dataUrl) {
+        return (
+            '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+            '<title>Certificate</title>' +
+            '<style>' +
+            '@page{size:A4 landscape;margin:0}' +
+            '*{box-sizing:border-box}' +
+            'html,body{margin:0;padding:0;background:#fff;width:100%;height:100%}' +
+            '.sheet{min-height:100vh;width:100%;display:flex;align-items:center;justify-content:center;padding:0}' +
+            'img{display:block;width:100%;height:auto;max-height:100vh;object-fit:contain}' +
+            '@media print{' +
+            '@page{size:A4 landscape;margin:0}' +
+            'html,body{width:100%;height:100%;margin:0;overflow:hidden}' +
+            '.sheet{min-height:0;width:100%;height:100%;padding:0}' +
+            /* Fit entire certificate on the page — never crop left/right */
+            'img{width:100% !important;height:100% !important;max-width:100% !important;max-height:100% !important;object-fit:contain !important}' +
+            '}' +
+            '</style></head><body>' +
+            '<div class="sheet"><img id="certPrintImg" alt="Certificate" src="' + dataUrl + '"></div>' +
+            '</body></html>'
+        );
+    }
+
+    function printCertificateImage(dataUrl) {
+        return new Promise(function (resolve, reject) {
+            const iframe = document.createElement('iframe');
+            iframe.setAttribute('title', 'Certificate print');
+            iframe.style.cssText = 'position:fixed;inset:0;width:0;height:0;border:0;opacity:0;pointer-events:none;';
+            document.body.appendChild(iframe);
+
+            const cleanup = function () {
+                setTimeout(function () {
+                    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+                }, 1500);
+            };
+
+            try {
+                const doc = iframe.contentDocument || iframe.contentWindow.document;
+                doc.open();
+                doc.write(buildCertPrintHtml(dataUrl));
+                doc.close();
+
+                const win = iframe.contentWindow;
+                const img = doc.getElementById('certPrintImg');
+
+                const doPrint = function () {
+                    try {
+                        win.focus();
+                        win.print();
+                        cleanup();
+                        resolve();
+                    } catch (err) {
+                        cleanup();
+                        reject(err);
+                    }
+                };
+
+                if (img && !img.complete) {
+                    img.onload = function () { setTimeout(doPrint, 100); };
+                    img.onerror = function () {
+                        cleanup();
+                        reject(new Error('Could not load certificate image for print'));
+                    };
+                } else {
+                    setTimeout(doPrint, 100);
+                }
+            } catch (err) {
+                cleanup();
+                reject(err);
+            }
+        });
+    }
+
     document.getElementById('btnPrint').addEventListener('click', async function () {
         const btn = this;
         btn.disabled = true;
         try {
-            // Render full landscape canvas, then print that image (avoids portrait squash).
             const canvas = await renderCanvas();
             const dataUrl = canvas.toDataURL('image/png');
-            const w = window.open('', '_blank', 'noopener,noreferrer');
-            if (!w) {
-                Swal.fire('Popup blocked', 'Allow popups for Print / PDF, or use Download PNG.', 'warning');
-                btn.disabled = false;
-                return;
-            }
-            w.document.open();
-            w.document.write(
-                '<!DOCTYPE html><html><head><meta charset="utf-8">' +
-                '<title>Certificate — Print</title>' +
-                '<style>' +
-                '@page{size:landscape;margin:0}' +
-                'html,body{margin:0;padding:0;background:#fff;width:100%;height:100%;}' +
-                'body{display:flex;align-items:center;justify-content:center;}' +
-                'img{display:block;width:100%;height:auto;max-height:100vh;object-fit:contain;}' +
-                '@media print{' +
-                'html,body{width:100%;height:100%;overflow:hidden}' +
-                'img{width:100%;height:100%;object-fit:contain;page-break-inside:avoid}' +
-                '}' +
-                '</style></head><body>' +
-                '<img id="certPrintImg" alt="Certificate" src="' + dataUrl + '">' +
-                '<script>' +
-                'var img=document.getElementById("certPrintImg");' +
-                'function go(){try{window.focus();window.print();}catch(e){}}' +
-                'if(img.complete){setTimeout(go,50);}else{img.onload=function(){setTimeout(go,50);};}' +
-                '<\/script></body></html>'
-            );
-            w.document.close();
+            await printCertificateImage(dataUrl);
         } catch (e) {
             Swal.fire('Error', e.message || 'Could not prepare print preview', 'error');
         }
