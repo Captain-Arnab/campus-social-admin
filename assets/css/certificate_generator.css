@@ -37,47 +37,79 @@
     box-sizing: border-box;
 }
 
-/* —— Header (university block) —— */
+/* —— Header (university block) — clear vertical stack, no overlap —— */
+#certCanvas .cert-header,
 .cert-header {
     position: absolute;
-    top: 5.2%;
-    left: 14%;
-    right: 20%;
+    top: 4.0%;
+    left: 11%;
+    right: 17%;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.32em;
     text-align: center;
     padding: 0;
+    margin: 0;
+    height: auto;
+    overflow: visible;
 }
 
+/* Force normal flow inside header (prevents stacked absolute children) */
+#certCanvas .cert-header > *,
+.cert-header > * {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    display: block;
+    width: auto;
+    max-width: 100%;
+    margin: 0 !important;
+    padding: 0;
+    transform: none !important;
+    float: none !important;
+}
+
+#certCanvas .cert-uni-name,
 .cert-uni-name {
     font-family: 'Playfair Display', Georgia, serif;
-    font-size: 2.1em;
+    font-size: 1.9em;
     font-weight: 700;
-    letter-spacing: 0.07em;
+    letter-spacing: 0.06em;
     color: #1a2d5a;
-    margin: 0;
-    line-height: 1.12;
+    line-height: 1.28;
+    white-space: nowrap;
 }
 
+#certCanvas .cert-uni-loc,
 .cert-uni-loc {
-    font-size: 0.95em;
+    font-size: 0.9em;
     font-weight: 600;
-    letter-spacing: 0.14em;
-    margin: 3px 0 0;
+    letter-spacing: 0.12em;
     color: #1a2d5a;
+    line-height: 1.35;
 }
 
+#certCanvas .cert-uni-est,
 .cert-uni-est {
-    font-size: 0.68em;
+    font-size: 0.64em;
     font-style: italic;
-    margin: 2px 0 0;
     color: #3d4f6f;
+    line-height: 1.4;
 }
 
+#certCanvas .cert-motto-line,
 .cert-motto-line {
-    font-size: 0.62em;
-    letter-spacing: 0.18em;
+    font-size: 0.58em;
+    letter-spacing: 0.14em;
     color: #9a7b2e;
-    margin: 6px 0 0;
     font-weight: 600;
+    line-height: 1.4;
+    margin-top: 0.2em !important;
 }
 
 /* —— Logo (top right) —— */
@@ -109,13 +141,14 @@
     line-height: 1.25;
 }
 
-/* —— Title —— */
+/* —— Title (leave room for 4-line university header above) —— */
 .cert-title-block {
     position: absolute;
-    top: 19.5%;
+    top: 23%;
     left: 0;
     right: 0;
     text-align: center;
+    z-index: 2;
 }
 
 .cert-title-main {
@@ -402,8 +435,31 @@
 }
 
 @media print {
+    @page {
+        size: landscape;
+        margin: 0;
+    }
+
     body * { visibility: hidden; }
-    .cert-print-area, .cert-print-area * { visibility: visible; }
-    .cert-print-area { position: absolute; left: 0; top: 0; width: 100%; }
-    #certCanvas { box-shadow: none; margin: 0; }
+    .cert-print-area,
+    .cert-print-area * { visibility: visible; }
+
+    .cert-print-area {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+    }
+
+    /* Must stay relative — overlays are absolute inside the canvas */
+    #certCanvas {
+        position: relative !important;
+        box-shadow: none;
+        margin: 0 auto;
+        overflow: hidden !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
 }

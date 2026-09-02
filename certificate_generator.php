@@ -1410,8 +1410,45 @@ function cert_achievement_phrase(string $key): string
         return out;
     }
 
-    document.getElementById('btnPrint').addEventListener('click', function () {
-        window.print();
+    document.getElementById('btnPrint').addEventListener('click', async function () {
+        const btn = this;
+        btn.disabled = true;
+        try {
+            // Render full landscape canvas, then print that image (avoids portrait squash).
+            const canvas = await renderCanvas();
+            const dataUrl = canvas.toDataURL('image/png');
+            const w = window.open('', '_blank', 'noopener,noreferrer');
+            if (!w) {
+                Swal.fire('Popup blocked', 'Allow popups for Print / PDF, or use Download PNG.', 'warning');
+                btn.disabled = false;
+                return;
+            }
+            w.document.open();
+            w.document.write(
+                '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+                '<title>Certificate — Print</title>' +
+                '<style>' +
+                '@page{size:landscape;margin:0}' +
+                'html,body{margin:0;padding:0;background:#fff;width:100%;height:100%;}' +
+                'body{display:flex;align-items:center;justify-content:center;}' +
+                'img{display:block;width:100%;height:auto;max-height:100vh;object-fit:contain;}' +
+                '@media print{' +
+                'html,body{width:100%;height:100%;overflow:hidden}' +
+                'img{width:100%;height:100%;object-fit:contain;page-break-inside:avoid}' +
+                '}' +
+                '</style></head><body>' +
+                '<img id="certPrintImg" alt="Certificate" src="' + dataUrl + '">' +
+                '<script>' +
+                'var img=document.getElementById("certPrintImg");' +
+                'function go(){try{window.focus();window.print();}catch(e){}}' +
+                'if(img.complete){setTimeout(go,50);}else{img.onload=function(){setTimeout(go,50);};}' +
+                '<\/script></body></html>'
+            );
+            w.document.close();
+        } catch (e) {
+            Swal.fire('Error', e.message || 'Could not prepare print preview', 'error');
+        }
+        btn.disabled = false;
     });
 
     document.getElementById('btnDownloadPng').addEventListener('click', async function () {
