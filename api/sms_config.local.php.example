@@ -13,7 +13,8 @@ return [
     'tmid' => '',                // Template Message ID / PE ID as required by gateway
     'otp_message_template' =>
         'Your OTP for MiCampus login is {OTP}. Please do not share this code with anyone. Valid for 10 minutes. Micampus.co.in',
-    // Password-reset OTP (separate DLT template from login)
+    // Password-reset OTP (dedicated DLT). Set true only to temporarily reuse login DLT.
+    'forgot_password_otp_use_login_dlt' => false,
     'forgot_password_otp_template_id' => '1777178850902651646',
     'forgot_password_otp_tmid' => '', // optional; empty = reuse login tmid
     'forgot_password_otp_message_template' =>

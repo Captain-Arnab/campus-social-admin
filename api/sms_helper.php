@@ -58,6 +58,8 @@ function sms_load_config() {
         'forgot_password_otp_tmid' => getenv('SMS_FORGOT_PASSWORD_OTP_TMID') ?: '',
         'forgot_password_otp_message_template' => getenv('SMS_FORGOT_PASSWORD_OTP_MESSAGE') ?:
             'Your OTP for MiCampus password reset is {OTP}. Please do not share this code with anyone. Valid for 10 minutes. Micampus.co.in',
+        // false = dedicated forgot DLT; true = reuse login DLT (fallback only).
+        'forgot_password_otp_use_login_dlt' => false,
         'event_created_template_id' => getenv('SMS_EVENT_CREATED_TEMPLATE_ID') ?: '1707177546592758639',
         'event_created_tmid' => getenv('SMS_EVENT_CREATED_TMID') ?: '',
         'event_created_message_template' => getenv('SMS_EVENT_CREATED_MESSAGE') ?:
@@ -330,12 +332,45 @@ function sms_build_forgot_password_otp_message($otp) {
 }
 
 /**
- * ConnectBind overrides for forgot-password OTP (dedicated DLT template).
- *
- * @return array{template_id: string, tmid?: string}
+ * Until the dedicated password-reset DLT template is mapped to sender MiCamp and delivers,
+ * reuse the working login DLT template + body (same pattern as login OTP).
  */
-function sms_forgot_password_otp_template_overrides(): array
+function sms_forgot_password_otp_use_login_dlt(): bool
 {
+    $cfg = sms_load_config();
+    if (!array_key_exists('forgot_password_otp_use_login_dlt', $cfg)) {
+        return false;
+    }
+    $v = $cfg['forgot_password_otp_use_login_dlt'];
+    if (is_bool($v)) {
+        return $v;
+    }
+    if (is_string($v)) {
+        return !in_array(strtolower(trim($v)), ['0', 'false', 'no', 'off', ''], true);
+    }
+    return (bool) $v;
+}
+
+/** Message body for password-reset SMS (login DLT fallback or dedicated template). */
+function sms_build_password_reset_otp_sms($otp): string
+{
+    if (sms_forgot_password_otp_use_login_dlt()) {
+        return sms_build_login_otp_message($otp);
+    }
+    return sms_build_forgot_password_otp_message($otp);
+}
+
+/**
+ * ConnectBind overrides for forgot-password OTP (dedicated DLT template).
+ * Empty when falling back to login DLT.
+ *
+ * @return array{template_id: string, tmid?: string}|null
+ */
+function sms_forgot_password_otp_template_overrides(): ?array
+{
+    if (sms_forgot_password_otp_use_login_dlt()) {
+        return null;
+    }
     $cfg = sms_load_config();
     $tid = trim((string) ($cfg['forgot_password_otp_template_id'] ?? ''));
     if ($tid === '') {
@@ -373,10 +408,11 @@ function process_job_login_otp_sms(array $payload, $conn = null, int $timeoutSec
         throw new InvalidArgumentException('destination must be 91XXXXXXXXXX, got: ' . $dest);
     }
 
-    // Login uses default config template_id; forgot-password uses dedicated DLT template.
-    $overrides = ($purpose === 'password_reset_otp')
-        ? sms_forgot_password_otp_template_overrides()
-        : null;
+    // Login uses default config template_id; forgot-password uses dedicated DLT only when enabled.
+    $overrides = null;
+    if ($purpose === 'password_reset_otp') {
+        $overrides = sms_forgot_password_otp_template_overrides();
+    }
 
     $send = sms_send_connectbind($dest, $message, $overrides, $timeoutSec);
     sms_log_attempt($conn, $purpose, $dest, $send, $jobId, $userId > 0 ? $userId : null);

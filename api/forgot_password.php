@@ -207,8 +207,8 @@ if ($action === 'request_otp') {
     }
 
     if ($channel === 'sms') {
-        // Same pattern as login OTP; dedicated DLT template_id is applied inside process_job.
-        $message = sms_build_forgot_password_otp_message($otp);
+        // Same ConnectBind path as login; dedicated forgot DLT template_id applied inside process_job.
+        $message = sms_build_password_reset_otp_sms($otp);
         $jobId = bg_jobs_enqueue($conn, 'login_otp_sms', [
             'user_id'     => $user_id,
             'destination' => $dest,
