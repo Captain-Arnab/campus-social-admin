@@ -39,7 +39,7 @@ function sms_phones_match_loose($a, $b) {
 }
 
 if (!defined('DLT_TEMPLATE_FORGOT_PASSWORD_OTP')) {
-    define('DLT_TEMPLATE_FORGOT_PASSWORD_OTP', '1777178851308908794');
+    define('DLT_TEMPLATE_FORGOT_PASSWORD_OTP', '1777178850902651646');
 }
 
 function sms_load_config() {
@@ -57,7 +57,7 @@ function sms_load_config() {
             ?: DLT_TEMPLATE_FORGOT_PASSWORD_OTP,
         'forgot_password_otp_tmid' => getenv('SMS_FORGOT_PASSWORD_OTP_TMID') ?: '',
         'forgot_password_otp_message_template' => getenv('SMS_FORGOT_PASSWORD_OTP_MESSAGE') ?:
-            "Your OTP for MiCampus password reset is {OTP}.\nPlease do not share this code with anyone.\nValid for 10 minutes.\nhttp://micampus.co.in",
+            "Your OTP for MiCampus password reset is {OTP}.\nPlease do not share this code with anyone.\nValid for 10 minutes.\nMicampus.co.in",
         'event_created_template_id' => getenv('SMS_EVENT_CREATED_TEMPLATE_ID') ?: '1707177546592758639',
         'event_created_tmid' => getenv('SMS_EVENT_CREATED_TMID') ?: '',
         'event_created_message_template' => getenv('SMS_EVENT_CREATED_MESSAGE') ?:
@@ -325,7 +325,7 @@ function sms_build_login_otp_message($otp) {
 function sms_build_forgot_password_otp_message($otp) {
     $cfg = sms_load_config();
     $tpl = $cfg['forgot_password_otp_message_template'] ??
-        "Your OTP for MiCampus password reset is {OTP}.\nPlease do not share this code with anyone.\nValid for 10 minutes.\nhttp://micampus.co.in";
+        "Your OTP for MiCampus password reset is {OTP}.\nPlease do not share this code with anyone.\nValid for 10 minutes.\nMicampus.co.in";
     return str_replace('{OTP}', (string) $otp, $tpl);
 }
 
@@ -351,9 +351,9 @@ function sms_forgot_password_otp_template_overrides(): array
 
 /**
  * Send login / password-reset OTP SMS (used by users.php, forgot_password.php, and background worker).
+ * Same ConnectBind path as login; password_reset_otp only swaps DLT template_id.
  *
- * @param array<string,mixed> $payload destination (91XXXXXXXXXX), message, optional user_id, job_id,
- *                                     purpose, template_id / tmid overrides
+ * @param array<string,mixed> $payload destination (91XXXXXXXXXX), message, optional user_id, job_id, purpose
  * @param mysqli|null $conn
  */
 function process_job_login_otp_sms(array $payload, $conn = null, int $timeoutSec = 10): void
@@ -373,17 +373,10 @@ function process_job_login_otp_sms(array $payload, $conn = null, int $timeoutSec
         throw new InvalidArgumentException('destination must be 91XXXXXXXXXX, got: ' . $dest);
     }
 
-    $overrides = null;
-    if ($purpose === 'password_reset_otp') {
-        $overrides = sms_forgot_password_otp_template_overrides();
-    }
-    if (!empty($payload['template_id'])) {
-        $overrides = is_array($overrides) ? $overrides : [];
-        $overrides['template_id'] = (string) $payload['template_id'];
-        if (array_key_exists('tmid', $payload) && $payload['tmid'] !== '' && $payload['tmid'] !== null) {
-            $overrides['tmid'] = (string) $payload['tmid'];
-        }
-    }
+    // Login uses default config template_id; forgot-password uses dedicated DLT template.
+    $overrides = ($purpose === 'password_reset_otp')
+        ? sms_forgot_password_otp_template_overrides()
+        : null;
 
     $send = sms_send_connectbind($dest, $message, $overrides, $timeoutSec);
     sms_log_attempt($conn, $purpose, $dest, $send, $jobId, $userId > 0 ? $userId : null);
