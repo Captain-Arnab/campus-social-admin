@@ -38,6 +38,10 @@ function sms_phones_match_loose($a, $b) {
     return false;
 }
 
+if (!defined('DLT_TEMPLATE_FORGOT_PASSWORD_OTP')) {
+    define('DLT_TEMPLATE_FORGOT_PASSWORD_OTP', '1777178851308908794');
+}
+
 function sms_load_config() {
     $defaults = [
         'base_url' => getenv('SMS_GATEWAY_BASE_URL') ?: '',
@@ -49,6 +53,11 @@ function sms_load_config() {
         'tmid' => getenv('SMS_GATEWAY_TMID') ?: '',
         'otp_message_template' => getenv('SMS_OTP_MESSAGE_TEMPLATE') ?:
             'Your OTP for MiCampus login is {OTP}. Please do not share this code with anyone. Valid for 10 minutes. Micampus.co.in',
+        'forgot_password_otp_template_id' => getenv('SMS_FORGOT_PASSWORD_OTP_TEMPLATE_ID')
+            ?: DLT_TEMPLATE_FORGOT_PASSWORD_OTP,
+        'forgot_password_otp_tmid' => getenv('SMS_FORGOT_PASSWORD_OTP_TMID') ?: '',
+        'forgot_password_otp_message_template' => getenv('SMS_FORGOT_PASSWORD_OTP_MESSAGE') ?:
+            "Your OTP for MiCampus password reset is {OTP}.\nPlease do not share this code with anyone.\nValid for 10 minutes.\nhttp://micampus.co.in",
         'event_created_template_id' => getenv('SMS_EVENT_CREATED_TEMPLATE_ID') ?: '1707177546592758639',
         'event_created_tmid' => getenv('SMS_EVENT_CREATED_TMID') ?: '',
         'event_created_message_template' => getenv('SMS_EVENT_CREATED_MESSAGE') ?:
@@ -310,9 +319,41 @@ function sms_build_login_otp_message($otp) {
 }
 
 /**
- * Send login OTP SMS (used by users.php inline and by background worker).
+ * DLT-approved password-reset OTP body (template ID DLT_TEMPLATE_FORGOT_PASSWORD_OTP).
+ * Line breaks / wording must match the registered template exactly.
+ */
+function sms_build_forgot_password_otp_message($otp) {
+    $cfg = sms_load_config();
+    $tpl = $cfg['forgot_password_otp_message_template'] ??
+        "Your OTP for MiCampus password reset is {OTP}.\nPlease do not share this code with anyone.\nValid for 10 minutes.\nhttp://micampus.co.in";
+    return str_replace('{OTP}', (string) $otp, $tpl);
+}
+
+/**
+ * ConnectBind overrides for forgot-password OTP (dedicated DLT template).
  *
- * @param array<string,mixed> $payload destination (91XXXXXXXXXX), message, optional user_id, job_id
+ * @return array{template_id: string, tmid?: string}
+ */
+function sms_forgot_password_otp_template_overrides(): array
+{
+    $cfg = sms_load_config();
+    $tid = trim((string) ($cfg['forgot_password_otp_template_id'] ?? ''));
+    if ($tid === '') {
+        $tid = DLT_TEMPLATE_FORGOT_PASSWORD_OTP;
+    }
+    $overrides = ['template_id' => $tid];
+    $tmidExtra = trim((string) ($cfg['forgot_password_otp_tmid'] ?? ''));
+    if ($tmidExtra !== '') {
+        $overrides['tmid'] = $tmidExtra;
+    }
+    return $overrides;
+}
+
+/**
+ * Send login / password-reset OTP SMS (used by users.php, forgot_password.php, and background worker).
+ *
+ * @param array<string,mixed> $payload destination (91XXXXXXXXXX), message, optional user_id, job_id,
+ *                                     purpose, template_id / tmid overrides
  * @param mysqli|null $conn
  */
 function process_job_login_otp_sms(array $payload, $conn = null, int $timeoutSec = 10): void
@@ -331,7 +372,20 @@ function process_job_login_otp_sms(array $payload, $conn = null, int $timeoutSec
     if (!preg_match('/^91\d{10}$/', $dest)) {
         throw new InvalidArgumentException('destination must be 91XXXXXXXXXX, got: ' . $dest);
     }
-    $send = sms_send_connectbind($dest, $message, null, $timeoutSec);
+
+    $overrides = null;
+    if ($purpose === 'password_reset_otp') {
+        $overrides = sms_forgot_password_otp_template_overrides();
+    }
+    if (!empty($payload['template_id'])) {
+        $overrides = is_array($overrides) ? $overrides : [];
+        $overrides['template_id'] = (string) $payload['template_id'];
+        if (array_key_exists('tmid', $payload) && $payload['tmid'] !== '' && $payload['tmid'] !== null) {
+            $overrides['tmid'] = (string) $payload['tmid'];
+        }
+    }
+
+    $send = sms_send_connectbind($dest, $message, $overrides, $timeoutSec);
     sms_log_attempt($conn, $purpose, $dest, $send, $jobId, $userId > 0 ? $userId : null);
     if (!$send['ok']) {
         $detail = $send['error'] ?? '';

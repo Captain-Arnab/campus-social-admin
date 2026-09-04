@@ -207,19 +207,22 @@ if ($action === 'request_otp') {
     }
 
     if ($channel === 'sms') {
-        // Must match the registered DLT OTP template exactly (same as login OTP).
-        $message = sms_build_login_otp_message($otp);
+        // Must match the registered DLT password-reset OTP template exactly.
+        $message = sms_build_forgot_password_otp_message($otp);
+        $tplOverrides = sms_forgot_password_otp_template_overrides();
         error_log(sprintf(
-            '[forgot_password request_otp] user_id=%d dest=%s msg_len=%d template_match=login_otp',
+            '[forgot_password request_otp] user_id=%d dest=%s msg_len=%d template_id=%s template_match=forgot_password_otp',
             $user_id,
             $dest,
-            strlen($message)
+            strlen($message),
+            $tplOverrides['template_id'] ?? ''
         ));
         $jobId = bg_jobs_enqueue($conn, 'login_otp_sms', [
             'user_id'     => $user_id,
             'destination' => $dest,
             'message'     => $message,
             'purpose'     => 'password_reset_otp',
+            'template_id' => $tplOverrides['template_id'],
         ], 0, 3);
         if ($jobId <= 0) {
             error_log('[forgot_password request_otp] enqueue failed user_id=' . $user_id);
@@ -239,6 +242,7 @@ if ($action === 'request_otp') {
                 'message'     => $message,
                 'job_id'      => $jobId,
                 'purpose'     => 'password_reset_otp',
+                'template_id' => $tplOverrides['template_id'],
             ], $conn, 10);
             bg_jobs_mark_done($conn, $jobId);
             error_log('[forgot_password request_otp] SMS ok job_id=' . $jobId . ' dest=' . $dest);
