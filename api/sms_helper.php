@@ -57,7 +57,7 @@ function sms_load_config() {
             ?: DLT_TEMPLATE_FORGOT_PASSWORD_OTP,
         'forgot_password_otp_tmid' => getenv('SMS_FORGOT_PASSWORD_OTP_TMID') ?: '',
         'forgot_password_otp_message_template' => getenv('SMS_FORGOT_PASSWORD_OTP_MESSAGE') ?:
-            "Your OTP for MiCampus password reset is {OTP}.\nPlease do not share this code with anyone.\nValid for 10 minutes.\nMicampus.co.in",
+            'Your OTP for MiCampus password reset is {OTP}. Please do not share this code with anyone. Valid for 10 minutes. Micampus.co.in',
         'event_created_template_id' => getenv('SMS_EVENT_CREATED_TEMPLATE_ID') ?: '1707177546592758639',
         'event_created_tmid' => getenv('SMS_EVENT_CREATED_TMID') ?: '',
         'event_created_message_template' => getenv('SMS_EVENT_CREATED_MESSAGE') ?:
@@ -325,7 +325,7 @@ function sms_build_login_otp_message($otp) {
 function sms_build_forgot_password_otp_message($otp) {
     $cfg = sms_load_config();
     $tpl = $cfg['forgot_password_otp_message_template'] ??
-        "Your OTP for MiCampus password reset is {OTP}.\nPlease do not share this code with anyone.\nValid for 10 minutes.\nMicampus.co.in";
+        'Your OTP for MiCampus password reset is {OTP}. Please do not share this code with anyone. Valid for 10 minutes. Micampus.co.in';
     return str_replace('{OTP}', (string) $otp, $tpl);
 }
 

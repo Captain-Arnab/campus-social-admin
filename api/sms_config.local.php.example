@@ -17,7 +17,7 @@ return [
     'forgot_password_otp_template_id' => '1777178850902651646',
     'forgot_password_otp_tmid' => '', // optional; empty = reuse login tmid
     'forgot_password_otp_message_template' =>
-        "Your OTP for MiCampus password reset is {OTP}.\nPlease do not share this code with anyone.\nValid for 10 minutes.\nMicampus.co.in",
+        'Your OTP for MiCampus password reset is {OTP}. Please do not share this code with anyone. Valid for 10 minutes. Micampus.co.in',
     // Optional: event-created admin SMS
     'event_created_template_id' => '',
     'event_created_tmid' => '',
