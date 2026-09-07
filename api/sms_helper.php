@@ -39,7 +39,7 @@ function sms_phones_match_loose($a, $b) {
 }
 
 if (!defined('DLT_TEMPLATE_FORGOT_PASSWORD_OTP')) {
-    define('DLT_TEMPLATE_FORGOT_PASSWORD_OTP', '1777178850902651646');
+    define('DLT_TEMPLATE_FORGOT_PASSWORD_OTP', '1777178851308908794');
 }
 
 function sms_load_config() {
