@@ -127,6 +127,7 @@ try {
     
     // Get event organizer's is_student status + registration deadline fields
     require_once __DIR__ . '/../event_date_range_schema.php';
+    require_once __DIR__ . '/registration_leave_helper.php';
     $event_query = "SELECT u.is_student as organizer_is_student, e.event_date";
     if (schema_events_has_registration_deadline($conn)) {
         $event_query .= ", e.registration_deadline";
@@ -159,7 +160,13 @@ try {
 
     if (events_row_registration_closed($event_data)) {
         http_response_code(400);
-        echo json_encode(["status" => "error", "message" => "Registration closed for this event"]);
+        echo json_encode([
+            "status" => "error",
+            "message" => "Registration closed for this event",
+            "registration_closed" => true,
+            "registration_deadline" => events_row_registration_deadline_value($event_data),
+            "server_time" => api_server_time_iso(),
+        ]);
         exit();
     }
     
@@ -175,27 +182,21 @@ try {
         ]);
         exit();
     }
-    
-    // Check if user is already an active volunteer for this event
+
+    require_once __DIR__ . '/event_staff_switch_lib.php';
+    require_once __DIR__ . '/registration_leave_helper.php';
+
+    // Already volunteering, or registered as participant/attendee → switch/update in place.
     $check_query = "SELECT id FROM volunteers WHERE user_id = ? AND event_id = ? AND status = 'active'";
     $stmt = $conn->prepare($check_query);
-    
     if (!$stmt) {
         http_response_code(500);
         echo json_encode(["status" => "error", "message" => "Database error: " . $conn->error]);
         exit();
     }
-    
     $stmt->bind_param("ii", $user_id, $event_id);
     $stmt->execute();
-    $result = $stmt->get_result();
-    
-    if ($result->num_rows > 0) {
-        http_response_code(400);
-        echo json_encode(["status" => "error", "message" => "You are already volunteering for this event"]);
-        $stmt->close();
-        exit();
-    }
+    $already_vol = $stmt->get_result()->num_rows > 0;
     $stmt->close();
 
     $part_check = $conn->prepare(
@@ -203,16 +204,24 @@ try {
     );
     $part_check->bind_param('ii', $user_id, $event_id);
     $part_check->execute();
-    if ($part_check->get_result()->num_rows > 0) {
-        http_response_code(400);
-        echo json_encode([
-            'status' => 'error',
-            'message' => 'You are registered as a participant. Use switch_staff_role to change to volunteer.',
+    $has_part = $part_check->get_result()->num_rows > 0;
+    $part_check->close();
+
+    $att_check = $conn->prepare('SELECT id FROM attendees WHERE user_id = ? AND event_id = ? LIMIT 1');
+    $att_check->bind_param('ii', $user_id, $event_id);
+    $att_check->execute();
+    $has_att = $att_check->get_result()->num_rows > 0;
+    $att_check->close();
+
+    if ($already_vol || $has_part || $has_att) {
+        event_staff_switch_role($conn, [
+            'event_id' => $event_id,
+            'user_id' => $user_id,
+            'to_role' => 'volunteer',
+            'role' => $role,
         ]);
-        $part_check->close();
         exit();
     }
-    $part_check->close();
     
     // Insert new volunteer record
     $insert_query = "INSERT INTO volunteers (event_id, user_id, role, status) 
@@ -229,20 +238,14 @@ try {
     
     if ($insert_stmt->execute()) {
         $new_volunteer_id = $insert_stmt->insert_id;
-        // Volunteer and attendee are mutually exclusive, so the join counts stay in sync.
-        $att_del = $conn->prepare("DELETE FROM attendees WHERE event_id = ? AND user_id = ?");
-        if ($att_del) {
-            $att_del->bind_param("ii", $event_id, $user_id);
-            $att_del->execute();
-            $att_del->close();
-        }
-        require_once __DIR__ . '/registration_leave_helper.php';
         $counts = registration_event_counts($conn, $event_id);
         http_response_code(200);
         echo json_encode([
             "status" => "success", 
             "message" => "You have been registered as a volunteer",
             "volunteer_id" => $new_volunteer_id,
+            "from_role" => "none",
+            "to_role" => "volunteer",
             "server_time" => api_server_time_iso(),
             "attendee_count" => $counts['attendee_count'],
             "volunteer_count" => $counts['volunteer_count'],

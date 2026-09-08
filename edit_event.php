@@ -38,6 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $venue = trim($_POST['venue'] ?? '');
     $event_date = trim($_POST['event_date'] ?? '');
     $event_end_date = trim($_POST['event_end_date'] ?? '');
+    $registration_deadline = trim($_POST['registration_deadline'] ?? '');
     $description = trim($_POST['description'] ?? '');
     $rules = trim($_POST['rules'] ?? '');
 
@@ -45,10 +46,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($category === '') $errors[] = "Category is required";
     if ($venue === '') $errors[] = "Venue is required";
     if ($event_date === '') $errors[] = "Event start date/time is required";
+    if (schema_events_has_registration_deadline($conn) && $registration_deadline === '') {
+        $errors[] = "Registration Closing Date & Time is required";
+    }
 
     // Basic date validation (expects HTML datetime-local format)
     $event_date_mysql = null;
     $event_end_mysql   = null;
+    $registration_deadline_mysql = null;
     if ($event_date !== '') {
         $dt = DateTime::createFromFormat('Y-m-d\TH:i', $event_date);
         if (!$dt) {
@@ -63,6 +68,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] = "Invalid end date/time format";
         } else {
             $event_end_mysql = $dtEnd->format('Y-m-d H:i:s');
+        }
+    }
+    if ($registration_deadline !== '') {
+        $dtRd = DateTime::createFromFormat('Y-m-d\TH:i', $registration_deadline);
+        if (!$dtRd) {
+            $errors[] = "Invalid registration closing date/time format";
+        } else {
+            $registration_deadline_mysql = $dtRd->format('Y-m-d H:i:s');
         }
     }
     if ($event_date_mysql && $event_end_mysql && strtotime($event_end_mysql) < strtotime($event_date_mysql)) {
@@ -88,6 +101,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($upd->execute() && $upd->affected_rows >= 0) {
             $upd->close();
+            if (schema_events_has_registration_deadline($conn)) {
+                if ($registration_deadline_mysql === null) {
+                    @$conn->query("UPDATE events SET registration_deadline = NULL WHERE id = $id");
+                } else {
+                    $rd_esc = $conn->real_escape_string($registration_deadline_mysql);
+                    @$conn->query("UPDATE events SET registration_deadline = '$rd_esc' WHERE id = $id");
+                }
+            }
             // Clear any pending edit from organizer/editor when admin edits directly
             @$conn->query("DELETE FROM event_pending_edits WHERE event_id = $id");
 
@@ -110,6 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // Prefill form values
 $dt_prefill = '';
 $dt_end_prefill = '';
+$dt_reg_prefill = '';
 try {
     if (!empty($event['event_date'])) {
         $dt_prefill = (new DateTime($event['event_date']))->format('Y-m-d\TH:i');
@@ -117,9 +139,13 @@ try {
     if (!empty($event['event_end_date']) && ($event['event_end_date'] ?? '') !== '0000-00-00 00:00:00') {
         $dt_end_prefill = (new DateTime($event['event_end_date']))->format('Y-m-d\TH:i');
     }
+    if (!empty($event['registration_deadline']) && ($event['registration_deadline'] ?? '') !== '0000-00-00 00:00:00') {
+        $dt_reg_prefill = (new DateTime($event['registration_deadline']))->format('Y-m-d\TH:i');
+    }
 } catch (Exception $e) {
     $dt_prefill = '';
     $dt_end_prefill = '';
+    $dt_reg_prefill = '';
 }
 
 $banners = json_decode($event['banners'] ?? '[]');
@@ -213,6 +239,11 @@ $banners = json_decode($event['banners'] ?? '[]');
                         <div class="col-md-6">
                             <label class="form-label fw-bold small">Ends (to) <span class="text-muted fw-normal">— optional</span></label>
                             <input type="datetime-local" name="event_end_date" class="form-control" value="<?php echo htmlspecialchars($_POST['event_end_date'] ?? $dt_end_prefill); ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small">Registration Closing Date &amp; Time <span class="text-danger">*</span></label>
+                            <input type="datetime-local" name="registration_deadline" class="form-control" value="<?php echo htmlspecialchars($_POST['registration_deadline'] ?? $dt_reg_prefill); ?>" <?php echo schema_events_has_registration_deadline($conn) ? 'required' : ''; ?>>
+                            <div class="form-text">Join / leave / role switches are blocked after this time.</div>
                         </div>
                         <div class="col-12">
                             <label class="form-label fw-bold small">Description</label>

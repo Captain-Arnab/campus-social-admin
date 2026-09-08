@@ -3,6 +3,8 @@ session_start();
 include 'db.php';
 require_once __DIR__ . '/admin_priv.php';
 require_once __DIR__ . '/api/background_jobs_helper.php';
+require_once __DIR__ . '/event_pending_edits_helper.php';
+require_once __DIR__ . '/api/admin_public_url.php';
 
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     header("Location: index.php");
@@ -21,6 +23,7 @@ if ($id <= 0 || !in_array($action, ['approve', 'reject'])) {
     exit();
 }
 
+schema_event_pending_edits_ensure_extras($conn);
 $pending = @$conn->query("SELECT * FROM event_pending_edits WHERE event_id = $id")->fetch_assoc();
 if (!$pending) {
     header("Location: event_details.php?id=$id&msg=no_pending");
@@ -68,6 +71,55 @@ if ($action === 'approve') {
             $conn->query("UPDATE events SET banners='$b_esc' WHERE id=$id");
         }
 
+        // Committee constitution (editors_json)
+        if (!empty($pending['editors_json'])) {
+            $editors = json_decode((string) $pending['editors_json'], true);
+            if (is_array($editors)) {
+                $orgId = (int) ($evBefore['organizer_id'] ?? 0);
+                $conn->query("DELETE FROM event_editors WHERE event_id = $id");
+                foreach ($editors as $uid) {
+                    $uid = (int) $uid;
+                    if ($uid > 0 && $uid !== $orgId) {
+                        @$conn->query("INSERT IGNORE INTO event_editors (event_id, user_id) VALUES ($id, $uid)");
+                    }
+                }
+            }
+        }
+
+        // Minutes of meeting → write approved meeting_minutes row + notify
+        $minutesId = 0;
+        $minutesContent = trim((string) ($pending['minutes_content'] ?? ''));
+        $minutesFile = trim((string) ($pending['minutes_file_path'] ?? ''));
+        if ($minutesContent !== '' || $minutesFile !== '') {
+            if ($minutesContent === '') {
+                $minutesContent = '(See attached minutes file)';
+            }
+            $submittedBy = (int) ($pending['submitted_by_user_id'] ?? 0);
+            $fp = $minutesFile !== '' ? $minutesFile : null;
+            $ins = $conn->prepare(
+                "INSERT INTO meeting_minutes (event_id, content, file_path, status, submitted_by, reviewed_at)
+                 VALUES (?, ?, ?, 'approved', ?, NOW())"
+            );
+            if ($ins) {
+                $ins->bind_param('issi', $id, $minutesContent, $fp, $submittedBy);
+                $ins->execute();
+                $minutesId = (int) $ins->insert_id;
+                $ins->close();
+            }
+        }
+
+        // Staged meeting update — send after approval
+        $meetingMsg = trim((string) ($pending['meeting_update_message'] ?? ''));
+        $meetingRecip = trim((string) ($pending['meeting_update_recipient_type'] ?? 'both'));
+        if ($meetingMsg !== '') {
+            bg_jobs_enqueue($conn, 'send_staged_meeting_update', [
+                'event_id' => $id,
+                'organizer_id' => (int) ($evBefore['organizer_id'] ?? 0),
+                'message' => $meetingMsg,
+                'recipient_type' => $meetingRecip !== '' ? $meetingRecip : 'both',
+            ]);
+        }
+
         // Restore to approved (C2: was flipped to pending on edit).
         $conn->query("UPDATE events SET status = 'approved' WHERE id = $id");
 
@@ -79,7 +131,6 @@ if ($action === 'approve') {
         $log_stmt->execute();
         $log_stmt->close();
 
-        // Notify organizer via existing FCM/inbox path
         require_once __DIR__ . '/api/app_inbox_notifications_helper.php';
         $orgId = (int) ($evBefore['organizer_id'] ?? 0);
         $titlePlain = (string) ($pending['title'] ?? ($evBefore['title'] ?? 'Event'));
@@ -91,6 +142,14 @@ if ($action === 'approve') {
             'event_id' => $id,
             'title' => $titlePlain,
         ]);
+
+        if ($minutesId > 0) {
+            bg_jobs_enqueue($conn, 'minutes_approved_notify', [
+                'event_id' => $id,
+                'minutes_id' => $minutesId,
+                'title' => $titlePlain,
+            ]);
+        }
 
         header("Location: event_details.php?id=$id&msg=edit_approved");
         exit();

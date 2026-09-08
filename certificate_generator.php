@@ -32,6 +32,68 @@ $defaults = [
     'achievement' => $achievement,
 ];
 
+$bulk_mode = !empty($_GET['bulk']) && $defaults['event_id'] > 0;
+$bulk_queue = [];
+if ($bulk_mode) {
+    $eid = $defaults['event_id'];
+    // Prefer pending/missing certificates; regenerate only when no ready file exists.
+    $parts = @$conn->query(
+        "SELECT p.user_id, u.full_name, 'participant' AS ctype_type
+         FROM participant p
+         JOIN users u ON u.id = p.user_id
+         WHERE p.event_id = $eid AND p.status = 'active'
+         ORDER BY u.full_name ASC"
+    );
+    if ($parts) {
+        while ($row = $parts->fetch_assoc()) {
+            $uid = (int) $row['user_id'];
+            $ex = @$conn->query(
+                "SELECT file_path, status FROM event_certificates
+                 WHERE event_id = $eid AND user_id = $uid AND type = 'participant' LIMIT 1"
+            );
+            $ready = false;
+            if ($ex && ($er = $ex->fetch_assoc())) {
+                $ready = !empty($er['file_path']) && (($er['status'] ?? 'ready') === 'ready' || ($er['status'] ?? '') === '');
+            }
+            if (!$ready) {
+                $bulk_queue[] = [
+                    'user_id' => $uid,
+                    'name' => (string) $row['full_name'],
+                    'type' => 'participant',
+                ];
+            }
+        }
+    }
+    $vols = @$conn->query(
+        "SELECT v.user_id, u.full_name, v.role, 'volunteer' AS ctype_type
+         FROM volunteers v
+         JOIN users u ON u.id = v.user_id
+         WHERE v.event_id = $eid AND v.status = 'active'
+         ORDER BY u.full_name ASC"
+    );
+    if ($vols) {
+        while ($row = $vols->fetch_assoc()) {
+            $uid = (int) $row['user_id'];
+            $ex = @$conn->query(
+                "SELECT file_path, status FROM event_certificates
+                 WHERE event_id = $eid AND user_id = $uid AND type = 'volunteer' LIMIT 1"
+            );
+            $ready = false;
+            if ($ex && ($er = $ex->fetch_assoc())) {
+                $ready = !empty($er['file_path']) && (($er['status'] ?? 'ready') === 'ready' || ($er['status'] ?? '') === '');
+            }
+            if (!$ready) {
+                $bulk_queue[] = [
+                    'user_id' => $uid,
+                    'name' => (string) $row['full_name'],
+                    'type' => 'volunteer',
+                    'role' => (string) ($row['role'] ?? ''),
+                ];
+            }
+        }
+    }
+}
+
 $signatory_options = ['Registrar', 'Dean', 'Director', 'Rector'];
 if (!in_array($defaults['signatory_title'], $signatory_options, true)) {
     $signatory_options[] = $defaults['signatory_title'];
@@ -207,11 +269,34 @@ function cert_achievement_phrase(string $key): string
 <div class="main-content">
     <div class="cert-gen-page-header d-flex flex-wrap justify-content-between align-items-start gap-2">
         <div>
-            <h4 class="fw-bold m-0">Certificate Generator</h4>
-            <p class="text-muted small mb-0">GNU appreciation template — live preview updates as you edit.</p>
+            <h4 class="fw-bold m-0">Certificate Generator<?php echo $bulk_mode ? ' — Bulk' : ''; ?></h4>
+            <p class="text-muted small mb-0"><?php echo $bulk_mode
+                ? 'Generate All will render and save certificates for every eligible participant/volunteer missing a ready file.'
+                : 'GNU appreciation template — live preview updates as you edit.'; ?></p>
         </div>
-        <a href="events.php?view=past" class="btn btn-outline-secondary rounded-3 btn-sm"><i class="fas fa-history me-1"></i>Past events</a>
+        <div class="d-flex gap-2 flex-wrap">
+            <?php if ($defaults['event_id'] > 0 && !$bulk_mode && has_priv('certificates')): ?>
+            <a href="certificate_generator.php?<?php echo http_build_query(['event_id' => $defaults['event_id'], 'bulk' => 1]); ?>" class="btn btn-success rounded-3 btn-sm"><i class="fas fa-layer-group me-1"></i>Generate All</a>
+            <?php endif; ?>
+            <a href="events.php?view=past" class="btn btn-outline-secondary rounded-3 btn-sm"><i class="fas fa-history me-1"></i>Past events</a>
+        </div>
     </div>
+    <?php if ($bulk_mode): ?>
+    <div class="alert alert-info rounded-3 mb-3" id="bulkCertPanel">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+                <strong>Bulk queue:</strong> <span id="bulkQueueCount"><?php echo count($bulk_queue); ?></span> recipient(s)
+                <div class="small text-muted" id="bulkStatusText">Click Start to generate and save each certificate automatically.</div>
+            </div>
+            <button type="button" class="btn btn-warning fw-bold" id="btnBulkStart" <?php echo count($bulk_queue) ? '' : 'disabled'; ?>>
+                <i class="fas fa-play me-1"></i>Start Generate All
+            </button>
+        </div>
+        <div class="progress mt-2" style="height:8px;display:none;" id="bulkProgressWrap">
+            <div class="progress-bar bg-success" id="bulkProgressBar" style="width:0%"></div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <div class="cert-gen-shell">
         <div class="cert-gen-editor card border-0 shadow-sm rounded-4">
@@ -532,6 +617,8 @@ function cert_achievement_phrase(string $key): string
     const INITIAL_EVENT_ID = <?php echo (int) $defaults['event_id']; ?>;
     const INITIAL_USER_ID = <?php echo (int) $defaults['user_id']; ?>;
     const INITIAL_NAME = <?php echo json_encode($defaults['participant_name']); ?>;
+    const BULK_MODE = <?php echo $bulk_mode ? 'true' : 'false'; ?>;
+    const BULK_QUEUE = <?php echo json_encode($bulk_queue, JSON_UNESCAPED_UNICODE); ?>;
     const DEFAULT_LOGO_URL = <?php echo json_encode($logo_path); ?>;
     const FALLBACK_LOGO_URL = <?php echo json_encode($default_logo_path); ?>;
     const DEFAULT_QR_URL = <?php echo json_encode($qr_path); ?>;
@@ -1144,20 +1231,20 @@ function cert_achievement_phrase(string $key): string
         const on = !!(show && has);
         if (sealPart) {
             sealPart.style.display = on ? 'block' : 'none';
-            sealPart.style.width = '85%';
-            sealPart.style.maxWidth = '150px';
-            sealPart.style.height = '48px';
-            sealPart.style.maxHeight = '48px';
+            sealPart.style.width = '180px';
+            sealPart.style.maxWidth = '180px';
+            sealPart.style.height = '70px';
+            sealPart.style.maxHeight = '70px';
             sealPart.style.overflow = 'hidden';
-            sealPart.style.margin = '0 auto 2px';
+            sealPart.style.margin = '0 auto 4px';
             sealPart.style.lineHeight = '0';
         }
         if (img) {
             img.style.display = on ? 'block' : 'none';
-            img.style.width = 'auto';
-            img.style.maxWidth = '100%';
-            img.style.height = 'auto';
-            img.style.maxHeight = '48px';
+            img.style.width = '100%';
+            img.style.maxWidth = '180px';
+            img.style.height = '100%';
+            img.style.maxHeight = '70px';
             img.style.objectFit = 'contain';
             img.style.objectPosition = 'center bottom';
             img.style.margin = '0 auto';
@@ -1374,18 +1461,20 @@ function cert_achievement_phrase(string $key): string
                 const sealWrap = doc.getElementById('cert_seal_wrap');
                 const sealImg = doc.getElementById('cert_seal_img');
                 if (sealWrap && sealWrap.style.display !== 'none') {
-                    sealWrap.style.maxWidth = '150px';
-                    sealWrap.style.height = '48px';
-                    sealWrap.style.maxHeight = '48px';
+                    sealWrap.style.width = '180px';
+                    sealWrap.style.maxWidth = '180px';
+                    sealWrap.style.height = '70px';
+                    sealWrap.style.maxHeight = '70px';
                     sealWrap.style.overflow = 'hidden';
-                    sealWrap.style.margin = '0 auto 2px';
+                    sealWrap.style.margin = '0 auto 4px';
                 }
                 if (sealImg && sealImg.style.display !== 'none') {
-                    sealImg.style.maxWidth = '100%';
-                    sealImg.style.maxHeight = '48px';
-                    sealImg.style.width = 'auto';
-                    sealImg.style.height = 'auto';
+                    sealImg.style.width = '100%';
+                    sealImg.style.maxWidth = '180px';
+                    sealImg.style.height = '100%';
+                    sealImg.style.maxHeight = '70px';
                     sealImg.style.objectFit = 'contain';
+                    sealImg.style.objectPosition = 'center bottom';
                 }
                 const dateBlock = doc.getElementById('cert_date_block');
                 if (dateBlock) {
@@ -1759,6 +1848,107 @@ function cert_achievement_phrase(string $key): string
     }
     updateLinkHint();
     updateSaveButton();
+
+    // —— Bulk Generate All (browser html2canvas loop) ——
+    async function saveCertificateForCurrentRecipient() {
+        const eventId = parseInt(document.getElementById('f_event_id').value, 10) || 0;
+        const userId = parseInt(document.getElementById('f_user_id').value, 10) || 0;
+        const type = document.getElementById('f_type').value || 'participant';
+        if (eventId <= 0 || userId <= 0) {
+            throw new Error('Missing event/user for save');
+        }
+        const canvas = await renderCanvas();
+        const dataUrl = canvas.toDataURL('image/png');
+        const fd = new FormData();
+        fd.append('event_id', String(eventId));
+        fd.append('user_id', String(userId));
+        fd.append('type', type);
+        fd.append('image_data', dataUrl);
+        const res = await fetch('save_generated_certificate.php', { method: 'POST', body: fd, credentials: 'same-origin' });
+        const data = await res.json();
+        if (data.status !== 'success') {
+            throw new Error(data.message || 'Save failed');
+        }
+        return data;
+    }
+
+    function applyBulkRecipient(rec) {
+        document.getElementById('f_event_id').value = String(INITIAL_EVENT_ID);
+        document.getElementById('f_user_id').value = String(rec.user_id || 0);
+        document.getElementById('f_type').value = rec.type === 'volunteer' ? 'volunteer' : 'participant';
+        const name = rec.name || '';
+        const nameInput = document.getElementById('f_participant_name');
+        if (nameInput) nameInput.value = name;
+        if (typeof syncParticipantNamePreview === 'function') syncParticipantNamePreview();
+        // Refresh certificate id so each file is unique
+        const idInput = document.getElementById('f_certificate_id');
+        if (idInput) {
+            idInput.value = 'GNU/' + new Date().getFullYear() + '/' + String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0');
+            if (typeof syncField === 'function') syncField('certificate_id');
+        }
+        let organised = document.getElementById('f_organised_by') ? document.getElementById('f_organised_by').value : '';
+        if (rec.type === 'volunteer' && rec.role) {
+            const base = organised.split('—')[0].trim();
+            organised = (base || organised) + ' — ' + rec.role;
+            const ob = document.getElementById('f_organised_by');
+            if (ob) {
+                ob.value = organised;
+                if (typeof syncField === 'function') syncField('organised_by');
+            }
+        }
+        updateSaveButton();
+        fitCertPreview();
+    }
+
+    const btnBulk = document.getElementById('btnBulkStart');
+    if (BULK_MODE && btnBulk) {
+        btnBulk.addEventListener('click', async function () {
+            const queue = Array.isArray(BULK_QUEUE) ? BULK_QUEUE.slice() : [];
+            if (!queue.length) {
+                Swal.fire('Nothing to generate', 'All eligible recipients already have certificates.', 'info');
+                return;
+            }
+            // Queue pending rows server-side (status tracking) then render in browser.
+            try {
+                await fetch('api/certificates.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ action: 'generate_all', event_id: INITIAL_EVENT_ID })
+                });
+            } catch (e) { /* non-fatal */ }
+
+            btnBulk.disabled = true;
+            const wrap = document.getElementById('bulkProgressWrap');
+            const bar = document.getElementById('bulkProgressBar');
+            const status = document.getElementById('bulkStatusText');
+            if (wrap) wrap.style.display = 'block';
+            let ok = 0;
+            let fail = 0;
+            for (let i = 0; i < queue.length; i++) {
+                const rec = queue[i];
+                if (status) status.textContent = 'Generating ' + (i + 1) + '/' + queue.length + ': ' + (rec.name || ('user ' + rec.user_id));
+                if (bar) bar.style.width = Math.round((i / queue.length) * 100) + '%';
+                try {
+                    applyBulkRecipient(rec);
+                    await new Promise(function (r) { setTimeout(r, 120); });
+                    await saveCertificateForCurrentRecipient();
+                    ok++;
+                } catch (e) {
+                    fail++;
+                    console.error('Bulk cert failed', rec, e);
+                }
+            }
+            if (bar) bar.style.width = '100%';
+            if (status) status.textContent = 'Done. Saved ' + ok + ', failed ' + fail + '.';
+            btnBulk.disabled = false;
+            Swal.fire(
+                fail ? 'Bulk finished with errors' : 'Bulk complete',
+                'Saved: ' + ok + (fail ? (' · Failed: ' + fail) : ''),
+                fail ? 'warning' : 'success'
+            );
+        });
+    }
 })();
 </script>
 </body>

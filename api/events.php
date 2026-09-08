@@ -123,6 +123,7 @@ function events_api_public_base(): string
  */
 function events_api_enrich_event_row(array &$row): void
 {
+    require_once __DIR__ . '/registration_leave_helper.php';
     $row['viewer_count'] = isset($row['attendee_count']) ? (int) $row['attendee_count'] : 0;
     $q = getenv('MICAMPUS_EVENT_SHARE_PATH');
     $path = ($q !== false && $q !== '') ? $q : '/event?id=';
@@ -137,9 +138,13 @@ function events_api_enrich_event_row(array &$row): void
     $close = events_row_close_info($row);
     $row['can_close'] = $close['can_close'];
     $row['close_blockers'] = $close['close_blockers'];
-    if (!array_key_exists('registration_deadline', $row)) {
-        $row['registration_deadline'] = null;
-    }
+
+    $deadline = events_row_registration_deadline_value($row);
+    $row['registration_deadline'] = $deadline;
+    $closed = events_row_registration_closed($row);
+    $row['registration_closed'] = $closed;
+    $row['registration_open'] = !$closed;
+    $row['server_time'] = api_server_time_iso();
 }
 
 /**
@@ -719,6 +724,28 @@ elseif ($method == 'POST') {
         ));
         exit();
     }
+
+    // Registration closing datetime is mandatory on create (stored as registration_deadline).
+    $create_deadline = null;
+    if (schema_events_has_registration_deadline($conn)) {
+        $rdRaw = trim((string) ($_POST['registration_deadline'] ?? $_POST['registration_closing'] ?? ''));
+        if ($rdRaw === '') {
+            echo json_encode(events_api_create_error(
+                'Registration Closing Date & Time is required (registration_deadline)',
+                'registration_deadline'
+            ));
+            exit();
+        }
+        $create_deadline = events_normalize_dt($rdRaw);
+        if ($create_deadline === null || strtotime($create_deadline) === false) {
+            echo json_encode(events_api_create_error(
+                'Invalid registration_deadline date/time format',
+                'registration_deadline',
+                $rdRaw
+            ));
+            exit();
+        }
+    }
     events_api_time_mark('validate_input', $tMark, $t0, $timings);
 
     $title = $conn->real_escape_string($title_plain);
@@ -842,15 +869,9 @@ elseif ($method == 'POST') {
     $new_id = (int) $conn->insert_id;
     events_api_time_mark('db_insert', $tMark, $t0, $timings);
 
-    if ($new_id > 0 && schema_events_has_registration_deadline($conn)) {
-        $rd = null;
-        if (isset($_POST['registration_deadline']) && trim((string) $_POST['registration_deadline']) !== '') {
-            $rd = events_normalize_dt((string) $_POST['registration_deadline']);
-        }
-        if ($rd !== null) {
-            $rd_esc = $conn->real_escape_string($rd);
-            @$conn->query("UPDATE events SET registration_deadline = '$rd_esc' WHERE id = $new_id");
-        }
+    if ($new_id > 0 && schema_events_has_registration_deadline($conn) && $create_deadline !== null) {
+        $rd_esc = $conn->real_escape_string($create_deadline);
+        @$conn->query("UPDATE events SET registration_deadline = '$rd_esc' WHERE id = $new_id");
     }
 
     // Queue SMS + inbox + FCM (was inline — caused 10–20s+ timeouts).
@@ -899,10 +920,14 @@ elseif ($method == 'POST') {
             'status'         => 'pending',
             'event_date'     => $start_raw,
             'event_end_date' => ($end_raw !== null && $end_raw !== '') ? $end_raw : null,
+            'registration_deadline' => $create_deadline,
+            'registration_closed' => false,
+            'registration_open' => true,
             'category'       => $cat_plain,
             'venue'          => $venue_plain,
             'banner_count'   => $deferBanners ? count($staged_files) : count($image_paths),
         ],
+        'server_time' => api_server_time_iso(),
         'notify_queued' => $jobId > 0,
     ];
     if ($banner_errors !== []) {

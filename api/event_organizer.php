@@ -6,6 +6,7 @@
 header('Content-Type: application/json');
 include 'db.php';
 require_once __DIR__ . '/../event_date_range_schema.php';
+require_once __DIR__ . '/admin_public_url.php';
 
 function organizer_event_has_winners(mysqli $conn, int $event_id): bool
 {
@@ -114,7 +115,13 @@ if ($action === 'set_review') {
                     $ins = $conn->prepare("INSERT INTO event_review_files (event_id, file_path, file_type, original_name, uploaded_by) VALUES (?, ?, ?, ?, ?)");
                     $ins->bind_param('isssi', $event_id, $path, $ftype, $fname, $organizer_id);
                     $ins->execute();
-                    $review_files[] = ['id' => (int)$conn->insert_id, 'file_path' => $path, 'original_name' => $fname];
+                    $review_files[] = [
+                        'id' => (int)$conn->insert_id,
+                        'file_path' => $path,
+                        'file_url' => admin_public_file_url($path),
+                        'file_type' => $ftype,
+                        'original_name' => $fname,
+                    ];
                     $ins->close();
                 }
             }

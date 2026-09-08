@@ -35,7 +35,6 @@ try {
             exit();
         }
 
-        // Leave is allowed after registration deadline (join is not).
         $chk = $conn->prepare("SELECT id FROM attendees WHERE user_id = ? AND event_id = ? LIMIT 1");
         $chk->bind_param("ii", $user_id, $event_id);
         $chk->execute();
@@ -145,31 +144,47 @@ try {
 
     if (events_row_registration_closed($event_row)) {
         http_response_code(400);
-        echo json_encode(["status" => "error", "message" => "Registration closed for this event"]);
+        echo json_encode([
+            "status" => "error",
+            "message" => "Registration closed for this event",
+            "registration_closed" => true,
+            "registration_deadline" => events_row_registration_deadline_value($event_row),
+            "server_time" => api_server_time_iso(),
+        ]);
         exit();
     }
 
-    $check_query = "SELECT id FROM attendees WHERE user_id = ? AND event_id = ?";
-    $stmt = $conn->prepare($check_query);
+    // Already attending, or registered as volunteer/participant → switch/update in place.
+    require_once __DIR__ . '/event_staff_switch_lib.php';
+    $vol_chk = $conn->prepare("SELECT id FROM volunteers WHERE user_id = ? AND event_id = ? AND status = 'active' LIMIT 1");
+    $vol_chk->bind_param('ii', $user_id, $event_id);
+    $vol_chk->execute();
+    $has_vol = $vol_chk->get_result()->num_rows > 0;
+    $vol_chk->close();
+    $part_chk = $conn->prepare("SELECT id FROM participant WHERE user_id = ? AND event_id = ? AND status = 'active' LIMIT 1");
+    $part_chk->bind_param('ii', $user_id, $event_id);
+    $part_chk->execute();
+    $has_part = $part_chk->get_result()->num_rows > 0;
+    $part_chk->close();
+    $att_chk = $conn->prepare("SELECT id FROM attendees WHERE user_id = ? AND event_id = ? LIMIT 1");
+    $att_chk->bind_param('ii', $user_id, $event_id);
+    $att_chk->execute();
+    $has_att = $att_chk->get_result()->num_rows > 0;
+    $att_chk->close();
 
-    if (!$stmt) {
-        http_response_code(500);
-        echo json_encode(["status" => "error", "message" => "Database error: " . $conn->error]);
-        exit();
-    }
-
-    $stmt->bind_param("ii", $user_id, $event_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-
-    if ($result->num_rows > 0) {
+    if ($has_att && !$has_vol && !$has_part) {
         http_response_code(400);
         echo json_encode(["status" => "error", "message" => "You are already attending this event"]);
-        $stmt->close();
         exit();
     }
-
-    $stmt->close();
+    if ($has_vol || $has_part || $has_att) {
+        event_staff_switch_role($conn, [
+            'event_id' => $event_id,
+            'user_id' => $user_id,
+            'to_role' => 'attendee',
+        ]);
+        exit();
+    }
 
     $insert_query = "INSERT INTO attendees (event_id, user_id, joined_at)
                      VALUES (?, ?, NOW())";
@@ -190,6 +205,8 @@ try {
             "status" => "success",
             "message" => "You have been registered as an attendee",
             "attendee_id" => $insert_stmt->insert_id,
+            "from_role" => "none",
+            "to_role" => "attendee",
             "server_time" => api_server_time_iso(),
             "attendee_count" => $counts['attendee_count'],
             "volunteer_count" => $counts['volunteer_count'],

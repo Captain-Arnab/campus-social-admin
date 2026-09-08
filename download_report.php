@@ -394,13 +394,37 @@ function createDocx($events_data, $filename, $list_type) {
             }
         }
 
-        // Review file attachments list
+        // Review file attachments (embed images; list non-images as text)
         if (!empty($review_files)) {
             $document .= '
             <w:p><w:pPr><w:spacing w:before="300" w:after="100"/></w:pPr>
                 <w:r><w:rPr><w:b/><w:sz w:val="24"/></w:rPr><w:t>Review Attachments (' . count($review_files) . ')</w:t></w:r></w:p>';
             foreach ($review_files as $idx => $rf) {
-                $document .= '<w:p><w:r><w:t>' . ($idx + 1) . '. ' . esc($rf['original_name'] ?: $rf['file_path']) . ' (' . esc($rf['file_type'] ?? 'file') . ')</w:t></w:r></w:p>';
+                $rel = str_replace('\\', '/', ltrim((string) ($rf['file_path'] ?? ''), '/'));
+                $abs = __DIR__ . '/' . $rel;
+                $is_image = (strpos($rf['file_type'] ?? '', 'image') !== false)
+                    || preg_match('/\.(jpe?g|png|gif|webp)$/i', $rel);
+                $embedded = false;
+                if ($is_image && $rel !== '' && is_file($abs)) {
+                    $bytes = @file_get_contents($abs);
+                    $norm = $bytes !== false ? report_normalize_image_for_docx($bytes, pathinfo($rel, PATHINFO_EXTENSION)) : null;
+                    if ($norm !== null) {
+                        $media_num++;
+                        $zip->addFromString('word/media/review_' . $media_num . '.' . $norm['ext'], $norm['bytes']);
+                        $embed_rid = 'rId' . $next_rid;
+                        $doc_rels_lines[] = '    <Relationship Id="' . $embed_rid . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/review_' . $media_num . '.' . $norm['ext'] . '"/>';
+                        $ct_overrides[] = '    <Override PartName="/word/media/review_' . $media_num . '.' . $norm['ext'] . '" ContentType="' . esc($norm['content_type']) . '"/>';
+                        $ext_emu = report_docx_image_extent_emu($norm['bytes']);
+                        $document .= '<w:p><w:r><w:t>' . ($idx + 1) . '. ' . esc($rf['original_name'] ?: basename($rel)) . '</w:t></w:r></w:p>';
+                        $document .= report_docx_banner_paragraph($embed_rid, $ext_emu['cx'], $ext_emu['cy'], $doc_pr_seq);
+                        $doc_pr_seq++;
+                        $next_rid++;
+                        $embedded = true;
+                    }
+                }
+                if (!$embedded) {
+                    $document .= '<w:p><w:r><w:t>' . ($idx + 1) . '. ' . esc($rf['original_name'] ?: $rf['file_path']) . ' (' . esc($rf['file_type'] ?? 'file') . ')</w:t></w:r></w:p>';
+                }
             }
         }
 

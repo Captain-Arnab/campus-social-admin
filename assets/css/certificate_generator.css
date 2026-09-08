@@ -374,15 +374,15 @@
     print-color-adjust: exact;
 }
 
-/* Cap signature so large PNG uploads cannot blow past the border */
+/* Fixed signature box — uploaded images scale/crop to fit consistently */
 .cert-sign-img-wrap {
     display: none;
     box-sizing: border-box;
-    width: 85%;
-    max-width: 150px;
-    height: 48px;
-    max-height: 48px;
-    margin: 0 auto 2px;
+    width: 180px;
+    height: 70px;
+    max-width: 180px;
+    max-height: 70px;
+    margin: 0 auto 4px;
     line-height: 0;
     overflow: hidden;
     background: transparent;
@@ -391,10 +391,10 @@
 .cert-sign-img-wrap img.cert-seal-img,
 #cert_seal_img.cert-seal-img {
     box-sizing: border-box;
-    width: auto !important;
-    max-width: 100% !important;
-    height: auto !important;
-    max-height: 48px !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 180px !important;
+    max-height: 70px !important;
     object-fit: contain !important;
     object-position: center bottom;
     display: block !important;

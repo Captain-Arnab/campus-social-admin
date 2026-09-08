@@ -165,17 +165,35 @@ function schema_events_has_closed_status($conn): bool {
 }
 
 /**
- * True when registration should be rejected.
- * Deadline = registration_deadline if set, else event_date (start). Closed when NOW() >= cutoff.
+ * Normalized registration_deadline or null when unset.
  *
- * @param array<string,mixed> $eventRow must include event_date; registration_deadline optional
+ * @param array<string,mixed> $eventRow
+ */
+function events_row_registration_deadline_value(array $eventRow): ?string {
+    $deadline = $eventRow['registration_deadline'] ?? null;
+    if ($deadline === null || $deadline === '' || $deadline === '0000-00-00 00:00:00') {
+        return null;
+    }
+    return (string) $deadline;
+}
+
+/**
+ * True when registration join/leave/role-switch should be rejected.
+ * Strict rule: closed only when registration_deadline is set AND NOW() >= deadline.
+ * Do NOT infer from event_date — missing deadline means registration stays open.
+ *
+ * @param array<string,mixed> $eventRow registration_deadline optional
  */
 function events_row_registration_closed(array $eventRow): bool {
-    $deadline = $eventRow['registration_deadline'] ?? null;
-    if ($deadline !== null && $deadline !== '' && $deadline !== '0000-00-00 00:00:00') {
-        return strtotime((string) $deadline) <= time();
+    $deadline = events_row_registration_deadline_value($eventRow);
+    if ($deadline === null) {
+        return false;
     }
-    return strtotime((string) ($eventRow['event_date'] ?? '')) <= time();
+    $ts = strtotime($deadline);
+    if ($ts === false) {
+        return false;
+    }
+    return $ts <= time();
 }
 
 /**

@@ -59,7 +59,7 @@ try {
     }
 
     $check = $conn->prepare(
-        'SELECT id, title FROM events WHERE id = ? AND organizer_id = ?'
+        'SELECT id, title, status FROM events WHERE id = ? AND organizer_id = ?'
     );
     $check->bind_param('ii', $event_id, $organizer_id);
     $check->execute();
@@ -69,6 +69,35 @@ try {
     if (!$ev) {
         http_response_code(403);
         echo json_encode(['status' => 'error', 'message' => 'Not the organizer of this event']);
+        exit();
+    }
+
+    // Post-approval meeting updates require admin reapproval (stage via event_pending_edits).
+    if (($ev['status'] ?? '') === 'approved'
+        || (($ev['status'] ?? '') === 'pending' && ($pe = @$conn->query("SELECT 1 FROM event_pending_edits WHERE event_id = $event_id LIMIT 1")) && $pe->num_rows > 0)
+    ) {
+        require_once __DIR__ . '/../event_pending_edits_helper.php';
+        $ok = event_pending_edits_stage($conn, $event_id, $organizer_id, [
+            'meeting_update_message' => $message,
+            'meeting_update_recipient_type' => $recipient_type,
+        ]);
+        if (!$ok) {
+            http_response_code(500);
+            echo json_encode(['status' => 'error', 'message' => 'Could not stage meeting update for approval']);
+            exit();
+        }
+        @$conn->query("UPDATE events SET status = 'pending' WHERE id = $event_id");
+        $remarks = 'Meeting update submitted for admin reapproval';
+        @$conn->query(
+            "INSERT INTO event_status_log (event_id, admin_type, admin_username, old_status, new_status, remarks)
+             VALUES ($event_id, 'app', 'user_$organizer_id', 'approved', 'pending', '" . $conn->real_escape_string($remarks) . "')"
+        );
+        echo json_encode([
+            'status' => 'success',
+            'message' => 'Meeting update submitted for admin approval',
+            'pending_approval' => true,
+            'event_id' => $event_id,
+        ]);
         exit();
     }
 

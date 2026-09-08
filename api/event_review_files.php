@@ -141,6 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $uploaded[] = [
                 'id' => (int) $conn->insert_id,
                 'file_path' => $path,
+                'file_url' => admin_public_file_url($path),
                 'file_type' => $type,
                 'original_name' => $name,
             ];

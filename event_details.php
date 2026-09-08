@@ -3,6 +3,8 @@ session_start();
 include 'db.php';
 require_once __DIR__ . '/admin_priv.php';
 require_once __DIR__ . '/event_date_range_schema.php';
+require_once __DIR__ . '/event_pending_edits_helper.php';
+require_once __DIR__ . '/api/admin_public_url.php';
 
 if ((!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) || !isset($_GET['id'])) {
     header("Location: dashboard.php");
@@ -92,10 +94,14 @@ if ($cert_res) {
 $review_files = [];
 $rf_res = @$conn->query("SELECT id, file_path, file_type, original_name, uploaded_at FROM event_review_files WHERE event_id = $id ORDER BY uploaded_at ASC");
 if ($rf_res) {
-    while ($r = $rf_res->fetch_assoc()) { $review_files[] = $r; }
+    while ($r = $rf_res->fetch_assoc()) {
+        $r['file_url'] = admin_public_file_url($r['file_path'] ?? '');
+        $review_files[] = $r;
+    }
 }
 
 // Pending edit from organizer/editor (when event has editors, edits require admin approval)
+schema_event_pending_edits_ensure_extras($conn);
 $pending_edit = null;
 $pending_edit_res = @$conn->query("SELECT p.*, u.full_name as submitted_by_name FROM event_pending_edits p JOIN users u ON p.submitted_by_user_id = u.id WHERE p.event_id = $id");
 if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
@@ -285,15 +291,31 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                             <small class="text-warning fw-bold text-uppercase d-block mb-2" style="font-size: 0.6rem;">
                                 <i class="fas fa-paperclip me-1"></i>Review Attachments (<?php echo count($review_files); ?>)
                             </small>
-                            <div class="d-flex flex-wrap gap-2">
-                                <?php foreach ($review_files as $rf): 
-                                    $is_image = strpos($rf['file_type'] ?? '', 'image') !== false;
-                                    $is_pdf = strpos($rf['file_type'] ?? '', 'pdf') !== false;
+                            <div class="d-flex flex-wrap gap-3">
+                                <?php foreach ($review_files as $rf):
+                                    $is_image = strpos($rf['file_type'] ?? '', 'image') !== false
+                                        || preg_match('/\.(jpe?g|png|gif|webp)$/i', (string) ($rf['file_path'] ?? ''));
+                                    $is_pdf = strpos($rf['file_type'] ?? '', 'pdf') !== false
+                                        || preg_match('/\.pdf$/i', (string) ($rf['file_path'] ?? ''));
+                                    $href = !empty($rf['file_url']) ? $rf['file_url'] : (string) ($rf['file_path'] ?? '');
                                 ?>
-                                <a href="<?php echo htmlspecialchars($rf['file_path']); ?>" target="_blank" class="btn btn-sm <?php echo $is_pdf ? 'btn-outline-danger' : 'btn-outline-primary'; ?>" title="<?php echo htmlspecialchars($rf['original_name'] ?? 'File'); ?>">
-                                    <i class="fas fa-<?php echo $is_pdf ? 'file-pdf' : ($is_image ? 'image' : 'file'); ?> me-1"></i>
-                                    <?php echo htmlspecialchars($rf['original_name'] ?: 'File'); ?>
-                                </a>
+                                <div class="text-center" style="max-width: 180px;">
+                                    <?php if ($is_image && $href !== ''): ?>
+                                        <a href="<?php echo htmlspecialchars($href); ?>" target="_blank" class="d-block">
+                                            <img src="<?php echo htmlspecialchars($href); ?>"
+                                                 alt="<?php echo htmlspecialchars($rf['original_name'] ?: 'Review image'); ?>"
+                                                 style="width: 160px; height: 120px; object-fit: cover; border-radius: 10px; border: 1px solid #fde68a; background: #fff;">
+                                        </a>
+                                        <small class="d-block text-muted mt-1 text-truncate" title="<?php echo htmlspecialchars($rf['original_name'] ?? ''); ?>">
+                                            <?php echo htmlspecialchars($rf['original_name'] ?: 'Image'); ?>
+                                        </small>
+                                    <?php else: ?>
+                                        <a href="<?php echo htmlspecialchars($href); ?>" target="_blank" class="btn btn-sm <?php echo $is_pdf ? 'btn-outline-danger' : 'btn-outline-primary'; ?>">
+                                            <i class="fas fa-<?php echo $is_pdf ? 'file-pdf' : 'file'; ?> me-1"></i>
+                                            <?php echo htmlspecialchars($rf['original_name'] ?: 'File'); ?>
+                                        </a>
+                                    <?php endif; ?>
+                                </div>
                                 <?php endforeach; ?>
                             </div>
                         </div>
@@ -538,6 +560,12 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                     <button type="button" class="btn-action-main w-100 mt-2" style="background: #6c5ce7; color: white; border: none;" onclick="openAddEditorsModal()">
                         <i class="fas fa-user-plus me-2"></i>ADD FACULTY COORDINATORS
                     </button>
+                    <?php if ($is_past_event && has_priv('certificates')): ?>
+                    <a href="certificate_generator.php?<?php echo http_build_query(['event_id' => $id, 'bulk' => 1]); ?>"
+                       class="btn-action-main w-100 mt-2" style="background: #0f766e; color: white; text-decoration: none; display: inline-block; text-align:center;">
+                        <i class="fas fa-certificates me-2"></i>GENERATE ALL CERTIFICATES
+                    </a>
+                    <?php endif; ?>
                     <div id="editorsList" class="mt-2 small">
                         <?php foreach ($event_editors as $ed): ?>
                         <div class="d-flex align-items-center justify-content-between py-1 px-2 rounded mb-1" style="background: var(--brand-soft);">
@@ -650,6 +678,43 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                     <?php endif; ?>
                     <?php if (!empty($pending_edit['category'])): ?><div class="small mb-3"><strong>Category:</strong> <?php echo htmlspecialchars($pending_edit['category']); ?></div><?php endif; ?>
                     <?php if (!empty($pending_edit['rules'])): ?><div class="small mb-3"><strong>Rules:</strong> <?php echo nl2br(htmlspecialchars($pending_edit['rules'])); ?></div><?php endif; ?>
+                    <?php if (!empty($pending_edit['minutes_content']) || !empty($pending_edit['minutes_file_path'])): ?>
+                    <div class="small mb-3 p-2 rounded" style="background:#fff7ed;border:1px solid #fed7aa;">
+                        <strong class="d-block mb-1"><i class="fas fa-file-alt me-1"></i>Minutes of meeting (pending)</strong>
+                        <?php if (!empty($pending_edit['minutes_content'])): ?>
+                            <div class="mb-2"><?php echo nl2br(htmlspecialchars($pending_edit['minutes_content'])); ?></div>
+                        <?php endif; ?>
+                        <?php if (!empty($pending_edit['minutes_file_path'])):
+                            $mmUrl = admin_public_file_url($pending_edit['minutes_file_path']);
+                            $mmIsImg = preg_match('/\.(jpe?g|png|gif|webp)$/i', (string) $pending_edit['minutes_file_path']);
+                        ?>
+                            <?php if ($mmIsImg): ?>
+                                <a href="<?php echo htmlspecialchars($mmUrl); ?>" target="_blank">
+                                    <img src="<?php echo htmlspecialchars($mmUrl); ?>" alt="Minutes attachment" style="max-width:220px;max-height:160px;object-fit:cover;border-radius:8px;border:1px solid #fed7aa;">
+                                </a>
+                            <?php else: ?>
+                                <a href="<?php echo htmlspecialchars($mmUrl); ?>" target="_blank" class="btn btn-sm btn-outline-secondary">View attachment</a>
+                            <?php endif; ?>
+                        <?php endif; ?>
+                    </div>
+                    <?php endif; ?>
+                    <?php if (!empty($pending_edit['editors_json'])):
+                        $pendEditors = json_decode((string) $pending_edit['editors_json'], true);
+                        if (is_array($pendEditors)):
+                    ?>
+                    <div class="small mb-3"><strong>Committee (faculty coordinators) proposed IDs:</strong>
+                        <?php echo htmlspecialchars(implode(', ', array_map('intval', $pendEditors))); ?>
+                    </div>
+                    <?php endif; endif; ?>
+                    <?php if (!empty($pending_edit['meeting_update_message'])): ?>
+                    <div class="small mb-3 p-2 rounded" style="background:#eff6ff;border:1px solid #bfdbfe;">
+                        <strong class="d-block mb-1"><i class="fas fa-bullhorn me-1"></i>Meeting update (will send on approve)</strong>
+                        <div><?php echo nl2br(htmlspecialchars($pending_edit['meeting_update_message'])); ?></div>
+                        <?php if (!empty($pending_edit['meeting_update_recipient_type'])): ?>
+                        <div class="text-muted mt-1">Recipients: <?php echo htmlspecialchars($pending_edit['meeting_update_recipient_type']); ?></div>
+                        <?php endif; ?>
+                    </div>
+                    <?php endif; ?>
                     <?php if (has_priv('approve_events')): ?>
                     <div class="d-flex gap-2">
                         <button type="button" class="btn btn-success btn-sm" onclick="approveOrRejectEdit('approve')"><i class="fas fa-check me-1"></i>Approve edit</button>

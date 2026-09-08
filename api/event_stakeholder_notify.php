@@ -143,6 +143,108 @@ function process_job_minutes_approved_notify($conn, array $payload): void
 }
 
 /**
+ * After admin approves a staged meeting update, deliver push/inbox to recipients.
+ */
+function process_job_send_staged_meeting_update($conn, array $payload): void
+{
+    $eventId = (int) ($payload['event_id'] ?? 0);
+    $organizerId = (int) ($payload['organizer_id'] ?? 0);
+    $message = trim((string) ($payload['message'] ?? ''));
+    $recipientType = trim((string) ($payload['recipient_type'] ?? 'both'));
+    if ($eventId <= 0 || $message === '') {
+        throw new InvalidArgumentException('event_id and message required');
+    }
+    if (!in_array($recipientType, ['volunteers', 'participants', 'both', 'all'], true)) {
+        $recipientType = 'both';
+    }
+
+    $ev = @$conn->query("SELECT title FROM events WHERE id = $eventId LIMIT 1");
+    $title = ($ev && ($er = $ev->fetch_assoc())) ? (string) $er['title'] : 'Event';
+
+    $user_ids = [];
+    if ($recipientType === 'all') {
+        $st = $conn->query("SELECT id FROM users WHERE status = 'active'");
+        if ($st) {
+            while ($row = $st->fetch_assoc()) {
+                $user_ids[(int) $row['id']] = true;
+            }
+        }
+    } else {
+        if ($recipientType === 'volunteers' || $recipientType === 'both') {
+            $st = @$conn->query("SELECT user_id FROM volunteers WHERE event_id = $eventId AND status = 'active'");
+            if ($st) {
+                while ($row = $st->fetch_assoc()) {
+                    $user_ids[(int) $row['user_id']] = true;
+                }
+            }
+        }
+        if ($recipientType === 'participants' || $recipientType === 'both') {
+            $st = @$conn->query("SELECT user_id FROM participant WHERE event_id = $eventId AND status = 'active'");
+            if ($st) {
+                while ($row = $st->fetch_assoc()) {
+                    $user_ids[(int) $row['user_id']] = true;
+                }
+            }
+        }
+    }
+
+    $msg_esc = $conn->real_escape_string($message);
+    $rt_esc = $conn->real_escape_string($recipientType);
+    @$conn->query(
+        "INSERT INTO organizer_notifications (event_id, organizer_id, message, recipient_type)
+         VALUES ($eventId, $organizerId, '$msg_esc', '$rt_esc')"
+    );
+    $org_notif_id = (int) $conn->insert_id;
+
+    $ids = array_keys($user_ids);
+    if ($ids === []) {
+        return;
+    }
+
+    try {
+        if ($recipientType === 'all') {
+            campus_inbox_organizer_broadcast_all($conn, $eventId, $title, $message, $org_notif_id > 0 ? $org_notif_id : null);
+        } else {
+            campus_inbox_organizer_broadcast_recipients($conn, $ids, $eventId, $title, $message, $org_notif_id > 0 ? $org_notif_id : null);
+        }
+    } catch (Throwable $e) {
+        error_log('[send_staged_meeting_update] inbox: ' . $e->getMessage());
+    }
+
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $hasActive = false;
+    $colCheck = @$conn->query("SHOW COLUMNS FROM user_fcm_tokens LIKE 'is_active'");
+    if ($colCheck && $colCheck->num_rows > 0) {
+        $hasActive = true;
+    }
+    $activeFilter = $hasActive ? ' AND (is_active = 1 OR is_active IS NULL)' : '';
+    $stmt = $conn->prepare(
+        "SELECT fcm_token FROM user_fcm_tokens WHERE user_id IN ($placeholders)$activeFilter"
+    );
+    if (!$stmt) {
+        return;
+    }
+    $stmt->bind_param(str_repeat('i', count($ids)), ...$ids);
+    $stmt->execute();
+    $tres = $stmt->get_result();
+    $tokens = [];
+    while ($tr = $tres->fetch_assoc()) {
+        $tokens[] = $tr['fcm_token'];
+    }
+    $stmt->close();
+    if ($tokens !== [] && function_exists('fcm_send_multicast')) {
+        try {
+            fcm_send_multicast($tokens, 'Meeting update: ' . $title, $message, [
+                'type' => 'meeting_update',
+                'event_id' => (string) $eventId,
+            ]);
+        } catch (Throwable $e) {
+            error_log('[send_staged_meeting_update] fcm: ' . $e->getMessage());
+        }
+    }
+}
+
+/**
  * G3: enqueue pending certificate rows for browser-based generation later.
  * Does not render images server-side.
  */

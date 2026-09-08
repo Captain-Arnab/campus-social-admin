@@ -1,12 +1,15 @@
 <?php
 /**
- * Meeting minutes workflow.
+ * Meeting minutes workflow — consolidated into event_pending_edits reapproval.
  *
  * POST ?action=submit|approve|reject
- * GET  ?action=list|get  (or action via query)
+ * GET  ?action=list|get
+ *
+ * Host submit stages minutes onto event_pending_edits and flips the event to
+ * pending (same C2 pipeline as other post-approval edits). Live minutes rows
+ * are written only when admin approves the pending edit (or legacy approve here).
  *
  * Host = organizer_id + event_editors.
- * Admin approve/reject uses session (approve_events priv) OR admin_id in body for API clients.
  */
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -21,6 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/background_jobs_helper.php';
 require_once __DIR__ . '/admin_public_url.php';
+require_once __DIR__ . '/../event_pending_edits_helper.php';
 
 if (!isset($conn) || !$conn) {
     http_response_code(500);
@@ -76,6 +80,21 @@ function mm_row_public(array $row): array
     return $row;
 }
 
+/** Resolve event_id from POST body, JSON, multipart form, or query string. */
+function mm_resolve_int(array $data, string $key): int
+{
+    if (isset($data[$key]) && $data[$key] !== '' && $data[$key] !== null) {
+        return (int) $data[$key];
+    }
+    if (isset($_POST[$key]) && $_POST[$key] !== '') {
+        return (int) $_POST[$key];
+    }
+    if (isset($_GET[$key]) && $_GET[$key] !== '') {
+        return (int) $_GET[$key];
+    }
+    return 0;
+}
+
 if (!mm_ensure_table($conn)) {
     http_response_code(500);
     echo json_encode(['status' => 'error', 'message' => 'Could not prepare meeting_minutes table']);
@@ -113,7 +132,7 @@ if ($method === 'GET' || $action === 'list' || $action === 'get') {
         exit();
     }
 
-    $event_id = (int) ($data['event_id'] ?? $_GET['event_id'] ?? 0);
+    $event_id = mm_resolve_int($data, 'event_id');
     $statusFilter = trim((string) ($data['status'] ?? $_GET['status'] ?? ''));
     $sql = "SELECT * FROM meeting_minutes WHERE 1=1";
     if ($event_id > 0) {
@@ -141,11 +160,32 @@ if ($method !== 'POST') {
 }
 
 if ($action === 'submit') {
-    $event_id = (int) ($data['event_id'] ?? 0);
-    $user_id = (int) ($data['user_id'] ?? $data['submitted_by'] ?? 0);
-    $content = trim((string) ($data['content'] ?? ''));
-    if ($event_id <= 0 || $user_id <= 0 || $content === '') {
-        echo json_encode(['status' => 'error', 'message' => 'event_id, user_id, and content are required']);
+    $event_id = mm_resolve_int($data, 'event_id');
+    $user_id = mm_resolve_int($data, 'user_id');
+    if ($user_id <= 0) {
+        $user_id = mm_resolve_int($data, 'submitted_by');
+    }
+    $content = trim((string) ($data['content'] ?? $data['minutes'] ?? $_POST['content'] ?? ''));
+
+    // Attachment may arrive as attachment, picture, file, or minutes_file
+    $fileKey = null;
+    foreach (['attachment', 'picture', 'file', 'minutes_file', 'minutes_picture'] as $k) {
+        if (!empty($_FILES[$k]['tmp_name']) && ($_FILES[$k]['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+            $fileKey = $k;
+            break;
+        }
+    }
+
+    if ($event_id <= 0 || $user_id <= 0) {
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'event_id and user_id are required',
+            'hint' => 'Send event_id in form body (multipart/JSON) or as ?event_id= query param',
+        ]);
+        exit();
+    }
+    if ($content === '' && $fileKey === null) {
+        echo json_encode(['status' => 'error', 'message' => 'content or attachment (picture) is required']);
         exit();
     }
     if (!mm_is_host($conn, $event_id, $user_id)) {
@@ -154,33 +194,60 @@ if ($action === 'submit') {
         exit();
     }
 
+    $ev = @$conn->query("SELECT id, status, title FROM events WHERE id = $event_id LIMIT 1");
+    if (!$ev || !($evt = $ev->fetch_assoc())) {
+        echo json_encode(['status' => 'error', 'message' => 'Event not found']);
+        exit();
+    }
+
     $file_path = null;
-    if (!empty($_FILES['attachment']['tmp_name']) && $_FILES['attachment']['error'] === UPLOAD_ERR_OK) {
+    if ($fileKey !== null) {
         $dir = dirname(__DIR__) . '/uploads/meeting_minutes/';
         if (!is_dir($dir)) {
             mkdir($dir, 0777, true);
         }
-        $ext = pathinfo($_FILES['attachment']['name'], PATHINFO_EXTENSION);
+        $ext = pathinfo($_FILES[$fileKey]['name'], PATHINFO_EXTENSION);
         $fn = 'mm_' . $event_id . '_' . time() . '.' . preg_replace('/[^a-zA-Z0-9]/', '', $ext);
-        if (move_uploaded_file($_FILES['attachment']['tmp_name'], $dir . $fn)) {
+        if (move_uploaded_file($_FILES[$fileKey]['tmp_name'], $dir . $fn)) {
             $file_path = 'uploads/meeting_minutes/' . $fn;
         }
     }
 
-    $stmt = $conn->prepare("INSERT INTO meeting_minutes (event_id, content, file_path, status, submitted_by) VALUES (?, ?, ?, 'pending', ?)");
-    $stmt->bind_param('issi', $event_id, $content, $file_path, $user_id);
-    if (!$stmt->execute()) {
-        echo json_encode(['status' => 'error', 'message' => $stmt->error]);
+    // Stage via event_pending_edits (single reapproval workflow).
+    $stageOk = event_pending_edits_stage($conn, $event_id, $user_id, [
+        'minutes_content' => $content !== '' ? $content : '(See attached minutes file)',
+        'minutes_file_path' => $file_path,
+    ]);
+    if (!$stageOk) {
+        echo json_encode(['status' => 'error', 'message' => 'Could not stage minutes for approval']);
         exit();
     }
-    $newId = (int) $stmt->insert_id;
-    $stmt->close();
-    echo json_encode(['status' => 'success', 'message' => 'Minutes submitted for approval', 'id' => $newId]);
+
+    // Flip approved (or already-pending-with-edit) events to pending for admin review.
+    if (in_array($evt['status'], ['approved', 'pending'], true)) {
+        @$conn->query("UPDATE events SET status = 'pending' WHERE id = $event_id");
+        $remarks = 'Minutes of meeting submitted for admin reapproval by user_' . $user_id;
+        @$conn->query(
+            "INSERT INTO event_status_log (event_id, admin_type, admin_username, old_status, new_status, remarks)
+             VALUES ($event_id, 'app', 'user_$user_id', '" . $conn->real_escape_string($evt['status']) . "', 'pending', '" . $conn->real_escape_string($remarks) . "')"
+        );
+    }
+
+    echo json_encode([
+        'status' => 'success',
+        'message' => 'Minutes submitted for admin approval',
+        'pending_approval' => true,
+        'event_id' => $event_id,
+        'file_path' => $file_path,
+        'file_url' => $file_path ? admin_public_file_url($file_path) : '',
+    ]);
     exit();
 }
 
 if ($action === 'approve' || $action === 'reject') {
-    $id = (int) ($data['id'] ?? $data['minutes_id'] ?? 0);
+    // Legacy path: approve a meeting_minutes row directly (kept for admin API clients).
+    // Prefer approving via approve_event_edit.php when minutes are staged on pending edits.
+    $id = (int) ($data['id'] ?? $data['minutes_id'] ?? $_GET['id'] ?? 0);
     $reviewed_by = (int) ($data['reviewed_by'] ?? $data['admin_id'] ?? 0);
     if ($id <= 0) {
         echo json_encode(['status' => 'error', 'message' => 'id required']);

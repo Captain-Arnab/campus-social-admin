@@ -2,10 +2,8 @@
 /**
  * Shared helpers for leave/cancel registration and response counts.
  *
- * Leave policy: leaving is ALLOWED after the registration deadline.
- * Joining remains blocked once the deadline (or event_date fallback) has passed.
- * Rationale: deadline protects headcount/planning for new joins; users who already
- * registered should still be able to cancel so organizers see accurate intent.
+ * Leave / join / role-switch are all blocked once registration_deadline has passed
+ * (strict deadline vs server time; NULL deadline = open).
  */
 
 require_once __DIR__ . '/../event_date_range_schema.php';
@@ -95,16 +93,29 @@ function registration_leave_validate_user_event(mysqli $conn, int $event_id, int
     }
     $u->close();
 
-    $e = $conn->prepare('SELECT id FROM events WHERE id = ? LIMIT 1');
+    $evCols = 'id, event_date';
+    if (schema_events_has_registration_deadline($conn)) {
+        $evCols .= ', registration_deadline';
+    }
+    $e = $conn->prepare("SELECT $evCols FROM events WHERE id = ? LIMIT 1");
     if (!$e) {
         return ['ok' => false, 'message' => 'Database error', 'http' => 500];
     }
     $e->bind_param('i', $event_id);
     $e->execute();
-    if ($e->get_result()->num_rows === 0) {
-        $e->close();
+    $ev = $e->get_result()->fetch_assoc();
+    $e->close();
+    if (!$ev) {
         return ['ok' => false, 'message' => 'Event not found', 'http' => 404];
     }
-    $e->close();
+    if (events_row_registration_closed($ev)) {
+        return [
+            'ok' => false,
+            'message' => 'Registration closed for this event',
+            'http' => 400,
+            'registration_closed' => true,
+            'registration_deadline' => events_row_registration_deadline_value($ev),
+        ];
+    }
     return ['ok' => true];
 }
