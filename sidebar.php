@@ -357,6 +357,11 @@ if ($user_type == 'admin') {
                     <i class="fas fa-archive"></i> Archived (>30 Days)
                 </a>
             </li>
+            <li class="nav-item">
+                <a href="bulk_registration_deadline.php" class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'bulk_registration_deadline.php' ? 'active' : ''; ?>">
+                    <i class="fas fa-calendar-check"></i> Bulk Reg. Deadlines
+                </a>
+            </li>
             <?php endif; ?>
 
             <?php if (has_priv('certificates')): ?>
