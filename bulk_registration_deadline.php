@@ -107,7 +107,7 @@ function brd_batch_save($conn, $idToDeadline, $adminType, $adminUser)
         $sql = "UPDATE events
                 SET registration_deadline = $caseSql
                 WHERE id IN ($idList)
-                  AND (registration_deadline IS NULL OR registration_deadline = '0000-00-00 00:00:00')";
+                  AND registration_deadline IS NULL";
         if (!$conn->query($sql)) {
             throw new RuntimeException($conn->error ? $conn->error : 'Batch UPDATE failed');
         }
@@ -252,7 +252,6 @@ try {
                 FROM events e
                 INNER JOIN users u ON u.id = e.organizer_id
                 WHERE e.registration_deadline IS NULL
-                   OR e.registration_deadline = '0000-00-00 00:00:00'
                 ORDER BY e.event_date ASC, e.id ASC";
         $res = @$conn->query($sql);
         if ($res) {
