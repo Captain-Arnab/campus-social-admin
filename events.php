@@ -110,6 +110,16 @@ if (isset($_GET['ajax_filter'])) {
                         if (!empty($rowEnd) && $rowEnd !== '0000-00-00 00:00:00') {
                             echo '<small class="text-muted d-block" style="font-size:0.6rem;">→ ' . date('M d, Y h:i A', strtotime($rowEnd)) . '</small>';
                         }
+                        $rowReg = $row['registration_deadline'] ?? null;
+                        if (!empty($rowReg) && $rowReg !== '0000-00-00 00:00:00') {
+                            $regClosed = strtotime($rowReg) <= time();
+                            echo '<small class="d-block mt-1" style="font-size:0.6rem;color:' . ($regClosed ? '#b91c1c' : '#0f766e') . ';">'
+                                . '<i class="fas fa-user-clock me-1"></i>Reg. closes: ' . date('M d, Y h:i A', strtotime($rowReg))
+                                . ($regClosed ? ' (closed)' : '')
+                                . '</small>';
+                        } else {
+                            echo '<small class="d-block mt-1 text-muted" style="font-size:0.6rem;"><i class="fas fa-user-clock me-1"></i>Reg. closes: not set</small>';
+                        }
                         ?>
                         <?php if($row['status'] == 'hold' && $row['reschedule_date']): ?>
                         <small class="text-primary" style="font-size: 0.65rem;"><i class="fas fa-calendar-check"></i> Reschedule: <?php echo date('M d, Y', strtotime($row['reschedule_date'])); ?></small>
@@ -477,6 +487,22 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
                                 <div class="d-flex flex-column">
                                     <span class="fw-semibold" style="font-size: 0.8rem;"><?php echo date('M d, Y', strtotime($row['event_date'])); ?></span>
                                     <small class="text-muted" style="font-size: 0.65rem;"><?php echo date('h:i A', strtotime($row['event_date'])); ?></small>
+                                    <?php
+                                    $rowEndInit = $row['event_end_date'] ?? null;
+                                    if (!empty($rowEndInit) && $rowEndInit !== '0000-00-00 00:00:00') {
+                                        echo '<small class="text-muted d-block" style="font-size:0.6rem;">→ ' . date('M d, Y h:i A', strtotime($rowEndInit)) . '</small>';
+                                    }
+                                    $rowRegInit = $row['registration_deadline'] ?? null;
+                                    if (!empty($rowRegInit) && $rowRegInit !== '0000-00-00 00:00:00') {
+                                        $regClosedInit = strtotime($rowRegInit) <= time();
+                                        echo '<small class="d-block mt-1" style="font-size:0.6rem;color:' . ($regClosedInit ? '#b91c1c' : '#0f766e') . ';">'
+                                            . '<i class="fas fa-user-clock me-1"></i>Reg. closes: ' . date('M d, Y h:i A', strtotime($rowRegInit))
+                                            . ($regClosedInit ? ' (closed)' : '')
+                                            . '</small>';
+                                    } else {
+                                        echo '<small class="d-block mt-1 text-muted" style="font-size:0.6rem;"><i class="fas fa-user-clock me-1"></i>Reg. closes: not set</small>';
+                                    }
+                                    ?>
                                 </div>
                             </td>
                             <td>

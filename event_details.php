@@ -244,6 +244,25 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                                     ?>
                                 </span>
                             </div>
+                            <div class="col-12">
+                                <small class="text-muted fw-bold text-uppercase d-block mb-1" style="font-size: 0.6rem;">Registration closes</small>
+                                <?php
+                                $reg_dl = $event['registration_deadline'] ?? null;
+                                if (!empty($reg_dl) && $reg_dl !== '0000-00-00 00:00:00') {
+                                    $reg_closed = strtotime($reg_dl) <= time();
+                                    ?>
+                                    <span class="fw-semibold" style="color:<?php echo $reg_closed ? '#b91c1c' : '#0f766e'; ?>;">
+                                        <i class="fas fa-user-clock me-1"></i>
+                                        <?php echo htmlspecialchars(date('M d, Y | h:i A', strtotime($reg_dl))); ?>
+                                        <?php if ($reg_closed): ?><span class="badge bg-danger ms-1" style="font-size:0.65rem;">Closed</span><?php endif; ?>
+                                    </span>
+                                <?php } else { ?>
+                                    <span class="fw-semibold text-muted"><i class="fas fa-user-clock me-1"></i> Not set</span>
+                                    <?php if (has_priv('events')): ?>
+                                    <a href="bulk_registration_deadline.php" class="small ms-1">Set deadline</a>
+                                    <?php endif; ?>
+                                <?php } ?>
+                            </div>
                             <?php if($event['reschedule_date']): ?>
                             <div class="col-12">
                                 <div class="alert alert-warning mb-0">
@@ -675,6 +694,12 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                         echo ' &nbsp;<strong>Ends:</strong> ' . date('M d, Y h:i A', strtotime($pend_end));
                     }
                     ?></div>
+                    <?php endif; ?>
+                    <?php
+                    $pend_reg = $pending_edit['registration_deadline'] ?? null;
+                    if (!empty($pend_reg) && $pend_reg !== '0000-00-00 00:00:00'):
+                    ?>
+                    <div class="small mb-2"><strong>Registration closes:</strong> <?php echo date('M d, Y h:i A', strtotime($pend_reg)); ?></div>
                     <?php endif; ?>
                     <?php if (!empty($pending_edit['category'])): ?><div class="small mb-3"><strong>Category:</strong> <?php echo htmlspecialchars($pending_edit['category']); ?></div><?php endif; ?>
                     <?php if (!empty($pending_edit['rules'])): ?><div class="small mb-3"><strong>Rules:</strong> <?php echo nl2br(htmlspecialchars($pending_edit['rules'])); ?></div><?php endif; ?>
