@@ -3,10 +3,19 @@
  * Bulk Registration Deadline — set registration_deadline on events where it is still NULL.
  * Batch save uses one CASE UPDATE + one multi-row INSERT (single transaction).
  */
-session_start();
-include 'db.php';
+error_reporting(E_ALL);
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/admin_priv.php';
-require_once __DIR__ . '/event_date_range_schema.php';
+if (is_readable(__DIR__ . '/event_date_range_schema.php')) {
+    require_once __DIR__ . '/event_date_range_schema.php';
+}
 
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     header('Location: index.php');
@@ -14,17 +23,35 @@ if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
 }
 require_priv('events');
 
-$user_type = $_SESSION['user_type'] ?? (isset($_SESSION['admin']) ? 'admin' : 'subadmin');
-$username = isset($_SESSION['admin']) ? (string) $_SESSION['admin'] : (string) ($_SESSION['subadmin'] ?? '');
+if (!isset($conn) || !($conn instanceof mysqli)) {
+    http_response_code(500);
+    echo 'Database connection failed.';
+    exit();
+}
+
+$user_type = isset($_SESSION['user_type']) ? (string) $_SESSION['user_type'] : (isset($_SESSION['admin']) ? 'admin' : 'subadmin');
+$username = isset($_SESSION['admin']) ? (string) $_SESSION['admin'] : (string) (isset($_SESSION['subadmin']) ? $_SESSION['subadmin'] : '');
 
 $flash_ok = '';
 $flash_err = '';
 $flash_warn = '';
 
 /**
+ * True when events.registration_deadline exists (works even if schema helper file is outdated).
+ */
+function brd_has_deadline_column($conn)
+{
+    if (function_exists('schema_events_has_registration_deadline')) {
+        return (bool) schema_events_has_registration_deadline($conn);
+    }
+    $r = @$conn->query("SHOW COLUMNS FROM events LIKE 'registration_deadline'");
+    return ($r && $r->num_rows > 0);
+}
+
+/**
  * Normalize HTML datetime-local / free-text into MySQL datetime, or null if invalid.
  */
-function brd_normalize_deadline(?string $raw): ?string
+function brd_normalize_deadline($raw)
 {
     $raw = trim(str_replace('T', ' ', (string) $raw));
     if ($raw === '') {
@@ -43,21 +70,24 @@ function brd_normalize_deadline(?string $raw): ?string
 /**
  * Batch-set registration_deadline for selected events in ONE UPDATE + ONE log INSERT.
  *
- * @param array<int,string> $idToDeadline map event_id => 'Y-m-d H:i:s'
- * @return array{ok:bool,saved:int,message:string,warnings:string[]}
+ * @param mysqli $conn
+ * @param array $idToDeadline map event_id => datetime string
+ * @param string $adminType
+ * @param string $adminUser
+ * @return array
  */
-function brd_batch_save(mysqli $conn, array $idToDeadline, string $adminType, string $adminUser): array
+function brd_batch_save($conn, $idToDeadline, $adminType, $adminUser)
 {
-    if (!schema_events_has_registration_deadline($conn)) {
-        return ['ok' => false, 'saved' => 0, 'message' => 'registration_deadline column is missing — run migrations first.', 'warnings' => []];
+    if (!brd_has_deadline_column($conn)) {
+        return array('ok' => false, 'saved' => 0, 'message' => 'registration_deadline column is missing — run migrations first.', 'warnings' => array());
     }
-    if ($idToDeadline === []) {
-        return ['ok' => false, 'saved' => 0, 'message' => 'No events selected.', 'warnings' => []];
+    if (!is_array($idToDeadline) || $idToDeadline === array()) {
+        return array('ok' => false, 'saved' => 0, 'message' => 'No events selected.', 'warnings' => array());
     }
 
-    $ids = [];
-    $caseParts = [];
-    $warnings = [];
+    $ids = array();
+    $caseParts = array();
+    $warnings = array();
     foreach ($idToDeadline as $eid => $deadline) {
         $eid = (int) $eid;
         $deadline = brd_normalize_deadline($deadline);
@@ -67,18 +97,15 @@ function brd_batch_save(mysqli $conn, array $idToDeadline, string $adminType, st
         $ids[] = $eid;
         $caseParts[$eid] = $deadline;
     }
-    if ($ids === []) {
-        return ['ok' => false, 'saved' => 0, 'message' => 'No valid datetimes to save.', 'warnings' => []];
+    if ($ids === array()) {
+        return array('ok' => false, 'saved' => 0, 'message' => 'No valid datetimes to save.', 'warnings' => array());
     }
 
-    // Soft warnings: deadline after event_date
     $idList = implode(',', $ids);
-    $evRes = $conn->query("SELECT id, title, event_date FROM events WHERE id IN ($idList)");
-    $titles = [];
+    $evRes = @$conn->query("SELECT id, title, event_date FROM events WHERE id IN ($idList)");
     if ($evRes) {
         while ($row = $evRes->fetch_assoc()) {
             $eid = (int) $row['id'];
-            $titles[$eid] = (string) $row['title'];
             if (isset($caseParts[$eid]) && !empty($row['event_date'])) {
                 if (strtotime($caseParts[$eid]) > strtotime((string) $row['event_date'])) {
                     $warnings[] = '#' . $eid . ' "' . $row['title'] . '": deadline is after event start';
@@ -100,12 +127,10 @@ function brd_batch_save(mysqli $conn, array $idToDeadline, string $adminType, st
                 WHERE id IN ($idList)
                   AND (registration_deadline IS NULL OR registration_deadline = '0000-00-00 00:00:00')";
         if (!$conn->query($sql)) {
-            throw new RuntimeException($conn->error ?: 'Batch UPDATE failed');
+            throw new RuntimeException($conn->error ? $conn->error : 'Batch UPDATE failed');
         }
-        $saved = (int) $conn->affected_rows;
 
-        // Audit: one multi-row INSERT into existing event_status_log
-        $logValues = [];
+        $logValues = array();
         $atype = $conn->real_escape_string($adminType);
         $auser = $conn->real_escape_string($adminUser);
         foreach ($caseParts as $eid => $deadline) {
@@ -114,69 +139,69 @@ function brd_batch_save(mysqli $conn, array $idToDeadline, string $adminType, st
             );
             $logValues[] = '(' . (int) $eid . ", '$atype', '$auser', 'NULL', '" . $conn->real_escape_string($deadline) . "', '$remarks')";
         }
-        if ($logValues !== []) {
+        if ($logValues !== array()) {
             $logSql = 'INSERT INTO event_status_log (event_id, admin_type, admin_username, old_status, new_status, remarks) VALUES '
                 . implode(',', $logValues);
             if (!$conn->query($logSql)) {
-                throw new RuntimeException($conn->error ?: 'Audit log INSERT failed');
+                throw new RuntimeException($conn->error ? $conn->error : 'Audit log INSERT failed');
             }
         }
 
         $conn->commit();
-        return [
+        return array(
             'ok' => true,
-            'saved' => $saved > 0 ? count($caseParts) : count($caseParts),
+            'saved' => count($caseParts),
             'message' => 'Saved registration deadline for ' . count($caseParts) . ' event(s).',
             'warnings' => $warnings,
-        ];
-    } catch (Throwable $e) {
+        );
+    } catch (Exception $e) {
         $conn->rollback();
-        return ['ok' => false, 'saved' => 0, 'message' => $e->getMessage(), 'warnings' => []];
+        return array('ok' => false, 'saved' => 0, 'message' => $e->getMessage(), 'warnings' => array());
     }
 }
 
 // ——— POST handlers ———
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = (string) ($_POST['action'] ?? 'save_selected');
+    $action = isset($_POST['action']) ? (string) $_POST['action'] : 'save_selected';
 
     if ($action === 'save_row') {
-        $eid = (int) ($_POST['event_id'] ?? 0);
+        $eid = isset($_POST['event_id']) ? (int) $_POST['event_id'] : 0;
         $raw = '';
         if (isset($_POST['deadline']) && is_array($_POST['deadline'])) {
-            $raw = (string) ($_POST['deadline'][$eid] ?? '');
+            $raw = isset($_POST['deadline'][$eid]) ? (string) $_POST['deadline'][$eid] : '';
         } else {
-            $raw = (string) ($_POST['deadline'] ?? '');
+            $raw = isset($_POST['deadline']) ? (string) $_POST['deadline'] : '';
         }
-        $result = brd_batch_save($conn, [$eid => $raw], $user_type, $username);
-        if ($result['ok']) {
+        $result = brd_batch_save($conn, array($eid => $raw), $user_type, $username);
+        if (!empty($result['ok'])) {
             $flash_ok = $result['message'];
-            if ($result['warnings'] !== []) {
+            if (!empty($result['warnings'])) {
                 $flash_warn = implode('; ', $result['warnings']);
             }
         } else {
             $flash_err = $result['message'];
         }
     } elseif ($action === 'save_selected') {
-        $selected = $_POST['selected'] ?? [];
+        $selected = isset($_POST['selected']) ? $_POST['selected'] : array();
         if (!is_array($selected)) {
-            $selected = [];
+            $selected = array();
         }
-        $deadlines = $_POST['deadline'] ?? [];
+        $deadlines = isset($_POST['deadline']) ? $_POST['deadline'] : array();
         if (!is_array($deadlines)) {
-            $deadlines = [];
+            $deadlines = array();
         }
-        $map = [];
+        $map = array();
         foreach ($selected as $eidRaw) {
             $eid = (int) $eidRaw;
             if ($eid <= 0) {
                 continue;
             }
-            $map[$eid] = (string) ($deadlines[$eid] ?? '');
+            $map[$eid] = isset($deadlines[$eid]) ? (string) $deadlines[$eid] : '';
         }
         $result = brd_batch_save($conn, $map, $user_type, $username);
-        if ($result['ok']) {
+        if (!empty($result['ok'])) {
             $flash_ok = $result['message'];
-            if ($result['warnings'] !== []) {
+            if (!empty($result['warnings'])) {
                 $flash_warn = implode('; ', $result['warnings']);
             }
         } else {
@@ -186,33 +211,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // ——— Load events still missing a deadline ———
-$events = [];
+$events = array();
 $count_missing = 0;
-if (schema_events_has_registration_deadline($conn)) {
-    $sql = "SELECT e.id, e.title, e.event_date, e.event_end_date, e.status, e.registration_deadline,
-                   u.full_name AS host_name
+$has_deadline_col = brd_has_deadline_column($conn);
+
+if ($has_deadline_col) {
+    $sql = "SELECT e.id, e.title, e.event_date, e.status, u.full_name AS host_name
             FROM events e
             JOIN users u ON u.id = e.organizer_id
             WHERE e.registration_deadline IS NULL
                OR e.registration_deadline = '0000-00-00 00:00:00'
             ORDER BY e.event_date ASC, e.id ASC";
-    $res = $conn->query($sql);
+    $res = @$conn->query($sql);
     if ($res) {
         while ($row = $res->fetch_assoc()) {
             $events[] = $row;
         }
+        $count_missing = count($events);
+    } else {
+        $flash_err = 'Could not load events: ' . ($conn->error ? $conn->error : 'query failed');
     }
-    $count_missing = count($events);
 } else {
     $flash_err = 'registration_deadline column is missing. Run migrations/2026_batch_features.sql first.';
 }
 
-function brd_dt_local(?string $mysqlDt): string
+function brd_dt_local($mysqlDt)
 {
     if ($mysqlDt === null || $mysqlDt === '' || $mysqlDt === '0000-00-00 00:00:00') {
         return '';
     }
-    $ts = strtotime($mysqlDt);
+    $ts = strtotime((string) $mysqlDt);
     return $ts ? date('Y-m-d\TH:i', $ts) : '';
 }
 ?>
@@ -239,7 +267,7 @@ function brd_dt_local(?string $mysqlDt): string
     </style>
 </head>
 <body>
-<?php include 'sidebar.php'; ?>
+<?php include __DIR__ . '/sidebar.php'; ?>
 
 <div class="main-content">
     <div class="mb-3 d-flex flex-wrap justify-content-between align-items-start gap-2">
@@ -269,7 +297,7 @@ function brd_dt_local(?string $mysqlDt): string
         <div class="alert alert-danger rounded-3 py-2"><?php echo htmlspecialchars($flash_err); ?></div>
     <?php endif; ?>
 
-    <?php if ($count_missing === 0 && schema_events_has_registration_deadline($conn)): ?>
+    <?php if ($count_missing === 0 && $has_deadline_col && $flash_err === ''): ?>
         <div class="card-panel p-4 text-center text-muted">
             <i class="fas fa-check-circle text-success mb-2" style="font-size:1.5rem;"></i>
             <div class="fw-semibold">All events have a registration deadline set.</div>
@@ -326,7 +354,7 @@ function brd_dt_local(?string $mysqlDt): string
                     <tbody>
                         <?php foreach ($events as $ev):
                             $eid = (int) $ev['id'];
-                            $eventDate = (string) ($ev['event_date'] ?? '');
+                            $eventDate = isset($ev['event_date']) ? (string) $ev['event_date'] : '';
                             $eventPast = $eventDate !== '' && strtotime($eventDate) <= time();
                         ?>
                         <tr data-event-id="<?php echo $eid; ?>" data-event-date="<?php echo htmlspecialchars(brd_dt_local($eventDate)); ?>">
@@ -342,7 +370,7 @@ function brd_dt_local(?string $mysqlDt): string
                             <td class="text-nowrap small">
                                 <?php echo $eventDate ? htmlspecialchars(date('M d, Y h:i A', strtotime($eventDate))) : '—'; ?>
                             </td>
-                            <td class="small"><?php echo htmlspecialchars($ev['host_name'] ?? '—'); ?></td>
+                            <td class="small"><?php echo htmlspecialchars(isset($ev['host_name']) ? $ev['host_name'] : '—'); ?></td>
                             <td>
                                 <span class="status-chip" title="No registration_deadline stored; open/closed is not derived from event_date anymore.">
                                     no deadline set<?php echo $eventPast ? ' · event started' : ''; ?>
@@ -379,8 +407,11 @@ function brd_dt_local(?string $mysqlDt): string
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 (function () {
-    const selectAll = document.getElementById('selectAll');
-    const checks = () => Array.from(document.querySelectorAll('.row-check'));
+    var form = document.getElementById('bulkDeadlineForm');
+    var selectAll = document.getElementById('selectAll');
+    function checks() {
+        return Array.prototype.slice.call(document.querySelectorAll('.row-check'));
+    }
 
     if (selectAll) {
         selectAll.addEventListener('change', function () {
@@ -395,16 +426,15 @@ function brd_dt_local(?string $mysqlDt): string
     }
 
     function warnIfAfterEvent(input) {
-        const wrap = input.closest('td');
-        const icon = wrap ? wrap.querySelector('.deadline-warn') : null;
+        var wrap = input.closest('td');
+        var icon = wrap ? wrap.querySelector('.deadline-warn') : null;
         if (!icon) return;
-        const val = (input.value || '').trim();
-        const evDt = (input.getAttribute('data-event-date') || '').trim();
+        var val = (input.value || '').trim();
+        var evDt = (input.getAttribute('data-event-date') || '').trim();
         if (!val || !evDt) {
             icon.classList.add('d-none');
             return;
         }
-        // Compare as local datetime strings (YYYY-MM-DDTHH:mm)
         if (val > evDt) {
             icon.classList.remove('d-none');
         } else {
@@ -412,26 +442,26 @@ function brd_dt_local(?string $mysqlDt): string
         }
     }
 
-    document.querySelectorAll('.deadline-input').forEach(function (inp) {
+    Array.prototype.slice.call(document.querySelectorAll('.deadline-input')).forEach(function (inp) {
         inp.addEventListener('change', function () { warnIfAfterEvent(inp); });
         inp.addEventListener('input', function () { warnIfAfterEvent(inp); });
     });
 
-    const btnFixed = document.getElementById('btnApplyFixed');
+    var btnFixed = document.getElementById('btnApplyFixed');
     if (btnFixed) {
         btnFixed.addEventListener('click', function () {
-            const dt = (document.getElementById('bulkFixedDt').value || '').trim();
+            var dt = (document.getElementById('bulkFixedDt').value || '').trim();
             if (!dt) {
                 alert('Pick a datetime first.');
                 return;
             }
-            const rows = selectedRows();
+            var rows = selectedRows();
             if (!rows.length) {
                 alert('Select at least one event.');
                 return;
             }
             rows.forEach(function (tr) {
-                const inp = tr.querySelector('.deadline-input');
+                var inp = tr.querySelector('.deadline-input');
                 if (inp) {
                     inp.value = dt;
                     warnIfAfterEvent(inp);
@@ -440,27 +470,26 @@ function brd_dt_local(?string $mysqlDt): string
         });
     }
 
-    const btnRel = document.getElementById('btnApplyRelative');
+    var btnRel = document.getElementById('btnApplyRelative');
     if (btnRel) {
         btnRel.addEventListener('click', function () {
-            const days = parseInt(document.getElementById('bulkDaysBefore').value, 10);
+            var days = parseInt(document.getElementById('bulkDaysBefore').value, 10);
             if (isNaN(days) || days < 0) {
                 alert('Enter a valid number of days (0 or more).');
                 return;
             }
-            const rows = selectedRows();
+            var rows = selectedRows();
             if (!rows.length) {
                 alert('Select at least one event.');
                 return;
             }
             rows.forEach(function (tr) {
-                const evLocal = tr.getAttribute('data-event-date') || '';
-                const inp = tr.querySelector('.deadline-input');
+                var evLocal = tr.getAttribute('data-event-date') || '';
+                var inp = tr.querySelector('.deadline-input');
                 if (!inp || !evLocal) return;
-                // Parse as local time
-                const parts = evLocal.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+                var parts = evLocal.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
                 if (!parts) return;
-                const d = new Date(
+                var d = new Date(
                     parseInt(parts[1], 10),
                     parseInt(parts[2], 10) - 1,
                     parseInt(parts[3], 10),
@@ -469,7 +498,7 @@ function brd_dt_local(?string $mysqlDt): string
                     0
                 );
                 d.setDate(d.getDate() - days);
-                const pad = function (n) { return String(n).padStart(2, '0'); };
+                function pad(n) { return String(n).padStart(2, '0'); }
                 inp.value = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
                     + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
                 warnIfAfterEvent(inp);
@@ -477,41 +506,38 @@ function brd_dt_local(?string $mysqlDt): string
         });
     }
 
-    const form = document.getElementById('bulkDeadlineForm');
     if (form) {
         form.addEventListener('submit', function (e) {
-            const actionField = document.getElementById('formAction');
+            var actionField = document.getElementById('formAction');
             if (actionField && actionField.value === 'save_selected') {
-                const rows = selectedRows();
+                var rows = selectedRows();
                 if (!rows.length) {
                     e.preventDefault();
                     alert('Select at least one event to save.');
                     return;
                 }
-                let missing = 0;
+                var missing = 0;
                 rows.forEach(function (tr) {
-                    const inp = tr.querySelector('.deadline-input');
+                    var inp = tr.querySelector('.deadline-input');
                     if (!inp || !(inp.value || '').trim()) missing++;
                 });
                 if (missing > 0) {
                     e.preventDefault();
                     alert(missing + ' selected row(s) are missing a closing date/time.');
-                    return;
                 }
             }
         });
     }
 
     window.saveSingleRow = function (eid) {
-        const tr = document.querySelector('tr[data-event-id="' + eid + '"]');
+        var tr = document.querySelector('tr[data-event-id="' + eid + '"]');
         if (!tr || !form) return;
-        const inp = tr.querySelector('.deadline-input');
+        var inp = tr.querySelector('.deadline-input');
         if (!inp || !(inp.value || '').trim()) {
             alert('Pick a closing date/time for this row first.');
             return;
         }
-        // Clear other selection state; post only this row via dedicated fields
-        let eventIdField = form.querySelector('input[name="event_id"][data-single="1"]');
+        var eventIdField = form.querySelector('input[name="event_id"][data-single="1"]');
         if (!eventIdField) {
             eventIdField = document.createElement('input');
             eventIdField.type = 'hidden';
@@ -521,20 +547,17 @@ function brd_dt_local(?string $mysqlDt): string
         }
         eventIdField.value = String(eid);
 
-        const actionField = document.getElementById('formAction');
+        var actionField = document.getElementById('formAction');
         if (actionField) actionField.value = 'save_row';
-
-        // Ensure this row's deadline[id] is filled (already is) and submit
         form.submit();
     };
 
-    // Reset action when using main Save Selected
-    const btnSave = document.getElementById('btnSaveSelected');
+    var btnSave = document.getElementById('btnSaveSelected');
     if (btnSave) {
         btnSave.addEventListener('click', function () {
-            const actionField = document.getElementById('formAction');
+            var actionField = document.getElementById('formAction');
             if (actionField) actionField.value = 'save_selected';
-            const single = form.querySelector('input[name="event_id"][data-single="1"]');
+            var single = form.querySelector('input[name="event_id"][data-single="1"]');
             if (single) single.remove();
         });
     }
