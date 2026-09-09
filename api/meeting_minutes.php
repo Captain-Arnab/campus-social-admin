@@ -10,16 +10,198 @@
  * are written only when admin approves the pending edit (or legacy approve here).
  *
  * Host = organizer_id + event_editors.
+ *
+ * Field resolution (event_id / user_id): JSON body, $_POST (multipart/urlencoded),
+ * query string, camelCase aliases, organizer_id/submitted_by, then Bearer/X-User-Id.
  */
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-User-Id');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit();
 }
+
+// Gate: set MM_DEBUG=0 (env) or define MM_DEBUG false to silence. Default ON until confirmed.
+if (!defined('MM_DEBUG')) {
+    $mmEnv = getenv('MM_DEBUG');
+    define('MM_DEBUG', $mmEnv === false ? true : ((string) $mmEnv !== '0' && strcasecmp((string) $mmEnv, 'false') !== 0));
+}
+
+$content_type_early = (string) ($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '');
+$mm_raw_body = '';
+// Avoid reading php://input for multipart (body already parsed into $_POST/$_FILES).
+if (stripos($content_type_early, 'multipart/form-data') === false) {
+    $mm_raw_body = (string) file_get_contents('php://input');
+}
+
+function mm_debug_log(string $label, $payload = null): void
+{
+    if (!MM_DEBUG) {
+        return;
+    }
+    $dir = __DIR__ . '/logs';
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0777, true);
+    }
+    $line = '[' . date('Y-m-d H:i:s') . '] ' . $label;
+    if ($payload !== null) {
+        if (is_string($payload)) {
+            $line .= ' ' . $payload;
+        } else {
+            $enc = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            $line .= ' ' . ($enc !== false ? $enc : '[unencodable]');
+        }
+    }
+    $line .= "\n";
+    @error_log('[meeting_minutes] ' . trim($line));
+    @file_put_contents($dir . '/meeting_minutes_debug.log', $line, FILE_APPEND | LOCK_EX);
+}
+
+function mm_request_headers_assoc(): array
+{
+    $out = [];
+    if (function_exists('getallheaders')) {
+        $h = @getallheaders();
+        if (is_array($h)) {
+            foreach ($h as $k => $v) {
+                $out[(string) $k] = (string) $v;
+            }
+        }
+    }
+    foreach ($_SERVER as $k => $v) {
+        if (strpos($k, 'HTTP_') === 0 && is_scalar($v)) {
+            $name = str_replace(' ', '-', ucwords(strtolower(str_replace('_', ' ', substr($k, 5)))));
+            if (!isset($out[$name])) {
+                $out[$name] = (string) $v;
+            }
+        }
+    }
+    if (!empty($_SERVER['HTTP_AUTHORIZATION']) && !isset($out['Authorization'])) {
+        $out['Authorization'] = (string) $_SERVER['HTTP_AUTHORIZATION'];
+    }
+    if (!empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION']) && empty($out['Authorization'])) {
+        $out['Authorization'] = (string) $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+    }
+    return $out;
+}
+
+function mm_auth_header_value(): string
+{
+    $headers = mm_request_headers_assoc();
+    foreach ($headers as $k => $v) {
+        if (strcasecmp($k, 'Authorization') === 0) {
+            return trim((string) $v);
+        }
+    }
+    return trim((string) ($_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? ''));
+}
+
+/**
+ * Resolve int from JSON/$data, $_POST, $_GET (same fallback used for event_id).
+ */
+function mm_resolve_int(array $data, string $key): int
+{
+    if (isset($data[$key]) && $data[$key] !== '' && $data[$key] !== null) {
+        return (int) $data[$key];
+    }
+    if (isset($_POST[$key]) && $_POST[$key] !== '' && $_POST[$key] !== null) {
+        return (int) $_POST[$key];
+    }
+    if (isset($_GET[$key]) && $_GET[$key] !== '' && $_GET[$key] !== null) {
+        return (int) $_GET[$key];
+    }
+    return 0;
+}
+
+/** Try several client key aliases for the same int field. */
+function mm_resolve_int_aliases(array $data, array $keys): int
+{
+    foreach ($keys as $key) {
+        $v = mm_resolve_int($data, $key);
+        if ($v > 0) {
+            return $v;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Derive user_id from Authorization Bearer / X-User-Id when the client omits it.
+ * Login tokens are opaque (not stored server-side); numeric Bearer / user_N / JWT claims still work.
+ */
+function mm_resolve_user_from_auth(): int
+{
+    $headers = mm_request_headers_assoc();
+    foreach (['X-User-Id', 'X-Userid', 'X-Uid'] as $hk) {
+        foreach ($headers as $k => $v) {
+            if (strcasecmp($k, $hk) === 0 && $v !== '' && is_numeric($v)) {
+                return (int) $v;
+            }
+        }
+    }
+    if (!empty($_SERVER['HTTP_X_USER_ID']) && is_numeric($_SERVER['HTTP_X_USER_ID'])) {
+        return (int) $_SERVER['HTTP_X_USER_ID'];
+    }
+
+    $auth = mm_auth_header_value();
+    if ($auth === '') {
+        return 0;
+    }
+    $tok = $auth;
+    if (preg_match('/^\s*Bearer\s+(.+)$/i', $auth, $m)) {
+        $tok = trim($m[1]);
+    }
+    if ($tok === '') {
+        return 0;
+    }
+    if (ctype_digit($tok)) {
+        return (int) $tok;
+    }
+    if (preg_match('/^user[_-]?(\d+)$/i', $tok, $m2)) {
+        return (int) $m2[1];
+    }
+    // JWT-shaped: decode payload claims without verifying signature (best-effort identity hint).
+    $parts = explode('.', $tok);
+    if (count($parts) === 3) {
+        $b64 = strtr($parts[1], '-_', '+/');
+        $pad = strlen($b64) % 4;
+        if ($pad > 0) {
+            $b64 .= str_repeat('=', 4 - $pad);
+        }
+        $payload = json_decode((string) base64_decode($b64, true), true);
+        if (is_array($payload)) {
+            foreach (['user_id', 'userId', 'uid', 'id', 'sub'] as $ck) {
+                if (isset($payload[$ck]) && $payload[$ck] !== '' && is_numeric($payload[$ck])) {
+                    return (int) $payload[$ck];
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+// --- temporary request dump (gated by MM_DEBUG) ---
+mm_debug_log('INCOMING', [
+    'method' => $_SERVER['REQUEST_METHOD'] ?? '',
+    'uri' => $_SERVER['REQUEST_URI'] ?? '',
+    'content_type' => $content_type_early,
+    'GET' => $_GET,
+    'POST' => $_POST,
+    'FILES_keys' => array_keys($_FILES ?? []),
+    'FILES_meta' => array_map(static function ($f) {
+        return [
+            'name' => $f['name'] ?? null,
+            'error' => $f['error'] ?? null,
+            'size' => $f['size'] ?? null,
+        ];
+    }, $_FILES ?? []),
+    'raw_body' => strlen($mm_raw_body) > 4000 ? (substr($mm_raw_body, 0, 4000) . '…[truncated]') : $mm_raw_body,
+    'Authorization' => mm_auth_header_value() !== '' ? '(present)' : '(absent)',
+    'X-User-Id' => $_SERVER['HTTP_X_USER_ID'] ?? null,
+]);
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/background_jobs_helper.php';
@@ -80,21 +262,6 @@ function mm_row_public(array $row): array
     return $row;
 }
 
-/** Resolve event_id from POST body, JSON, multipart form, or query string. */
-function mm_resolve_int(array $data, string $key): int
-{
-    if (isset($data[$key]) && $data[$key] !== '' && $data[$key] !== null) {
-        return (int) $data[$key];
-    }
-    if (isset($_POST[$key]) && $_POST[$key] !== '') {
-        return (int) $_POST[$key];
-    }
-    if (isset($_GET[$key]) && $_GET[$key] !== '') {
-        return (int) $_GET[$key];
-    }
-    return 0;
-}
-
 if (!mm_ensure_table($conn)) {
     http_response_code(500);
     echo json_encode(['status' => 'error', 'message' => 'Could not prepare meeting_minutes table']);
@@ -102,19 +269,24 @@ if (!mm_ensure_table($conn)) {
 }
 
 $method = $_SERVER['REQUEST_METHOD'];
-$content_type = $_SERVER['CONTENT_TYPE'] ?? '';
-if ($method === 'POST' && (stripos($content_type, 'multipart/form-data') !== false || !empty($_POST))) {
-    $data = $_POST;
-} elseif ($method === 'POST') {
-    $data = json_decode(file_get_contents('php://input'), true);
-    if (!is_array($data)) {
-        $data = [];
+$content_type = $content_type_early;
+
+// Merge JSON + multipart/urlencoded POST so a single source does not wipe the other.
+$data = [];
+if ($mm_raw_body !== '') {
+    $json = json_decode($mm_raw_body, true);
+    if (is_array($json)) {
+        $data = $json;
     }
-} else {
+}
+if (!empty($_POST) && is_array($_POST)) {
+    $data = array_merge($data, $_POST);
+}
+if ($method !== 'POST' && empty($data)) {
     $data = $_GET;
 }
 
-$action = $data['action'] ?? ($_GET['action'] ?? '');
+$action = (string) ($data['action'] ?? $_POST['action'] ?? $_GET['action'] ?? '');
 
 if ($method === 'GET' || $action === 'list' || $action === 'get') {
     if ($action === 'get' || isset($_GET['id'])) {
@@ -132,7 +304,7 @@ if ($method === 'GET' || $action === 'list' || $action === 'get') {
         exit();
     }
 
-    $event_id = mm_resolve_int($data, 'event_id');
+    $event_id = mm_resolve_int_aliases($data, ['event_id', 'eventId']);
     $statusFilter = trim((string) ($data['status'] ?? $_GET['status'] ?? ''));
     $sql = "SELECT * FROM meeting_minutes WHERE 1=1";
     if ($event_id > 0) {
@@ -160,12 +332,20 @@ if ($method !== 'POST') {
 }
 
 if ($action === 'submit') {
-    $event_id = mm_resolve_int($data, 'event_id');
-    $user_id = mm_resolve_int($data, 'user_id');
+    $event_id = mm_resolve_int_aliases($data, ['event_id', 'eventId']);
+    $user_id = mm_resolve_int_aliases($data, [
+        'user_id', 'userId', 'submitted_by', 'submittedBy', 'organizer_id', 'organizerId',
+    ]);
+    $user_id_source = $user_id > 0 ? 'body/query' : '';
     if ($user_id <= 0) {
-        $user_id = mm_resolve_int($data, 'submitted_by');
+        $user_id = mm_resolve_user_from_auth();
+        if ($user_id > 0) {
+            $user_id_source = 'auth';
+        }
     }
-    $content = trim((string) ($data['content'] ?? $data['minutes'] ?? $_POST['content'] ?? ''));
+    $content = trim((string) (
+        $data['content'] ?? $data['minutes'] ?? $_POST['content'] ?? $_POST['minutes'] ?? ''
+    ));
 
     // Attachment may arrive as attachment, picture, file, or minutes_file
     $fileKey = null;
@@ -176,11 +356,30 @@ if ($action === 'submit') {
         }
     }
 
+    mm_debug_log('RESOLVED_SUBMIT', [
+        'action' => $action,
+        'event_id' => $event_id,
+        'user_id' => $user_id,
+        'user_id_source' => $user_id_source,
+        'content_len' => strlen($content),
+        'fileKey' => $fileKey,
+        'data_keys' => array_keys($data),
+    ]);
+
     if ($event_id <= 0 || $user_id <= 0) {
+        $missing = [];
+        if ($event_id <= 0) {
+            $missing[] = 'event_id';
+        }
+        if ($user_id <= 0) {
+            $missing[] = 'user_id';
+        }
+        mm_debug_log('REJECT_MISSING', ['missing' => $missing]);
         echo json_encode([
             'status' => 'error',
             'message' => 'event_id and user_id are required',
-            'hint' => 'Send event_id in form body (multipart/JSON) or as ?event_id= query param',
+            'missing' => $missing,
+            'hint' => 'Send event_id/user_id (or organizer_id) in multipart/JSON body or ?query; user_id may also come from Authorization Bearer / X-User-Id',
         ]);
         exit();
     }
@@ -232,6 +431,8 @@ if ($action === 'submit') {
              VALUES ($event_id, 'app', 'user_$user_id', '" . $conn->real_escape_string($evt['status']) . "', 'pending', '" . $conn->real_escape_string($remarks) . "')"
         );
     }
+
+    mm_debug_log('SUBMIT_OK', ['event_id' => $event_id, 'user_id' => $user_id, 'file_path' => $file_path]);
 
     echo json_encode([
         'status' => 'success',
