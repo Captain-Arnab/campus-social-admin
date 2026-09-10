@@ -3,6 +3,13 @@
  * Ensures API responses stay valid JSON (no PHP notices/warnings/fatal HTML).
  * Included from db.php for all HTTP API requests.
  */
+
+// Campus app times (deadlines, server_time, schedules) are Asia/Kolkata.
+// php.ini may be UTC/Europe/* — never rely on that for registration compares.
+if (function_exists('date_default_timezone_set')) {
+    @date_default_timezone_set('Asia/Kolkata');
+}
+
 if (php_sapi_name() === 'cli') {
     return;
 }

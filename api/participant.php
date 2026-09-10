@@ -173,7 +173,7 @@ try {
             "status" => "error",
             "message" => "Registration closed for this event",
             "registration_closed" => true,
-            "registration_deadline" => events_row_registration_deadline_value($event_data),
+            "registration_deadline" => events_row_registration_deadline_iso($event_data),
             "server_time" => api_server_time_iso(),
         ]);
         exit();

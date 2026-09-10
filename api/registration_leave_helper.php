@@ -114,7 +114,7 @@ function registration_leave_validate_user_event(mysqli $conn, int $event_id, int
             'message' => 'Registration closed for this event',
             'http' => 400,
             'registration_closed' => true,
-            'registration_deadline' => events_row_registration_deadline_value($ev),
+            'registration_deadline' => events_row_registration_deadline_iso($ev),
         ];
     }
     return ['ok' => true];

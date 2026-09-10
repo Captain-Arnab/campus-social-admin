@@ -165,7 +165,20 @@ function schema_events_has_closed_status($conn): bool {
 }
 
 /**
- * Normalized registration_deadline or null when unset.
+ * App/campus wall-clock timezone. Deadlines are stored as naive datetimes in this zone
+ * (MySQL DATETIME has no offset). Never use PHP's default php.ini timezone for compares.
+ */
+function events_app_timezone(): DateTimeZone
+{
+    static $tz = null;
+    if ($tz === null) {
+        $tz = new DateTimeZone('Asia/Kolkata');
+    }
+    return $tz;
+}
+
+/**
+ * Normalized registration_deadline (MySQL DATETIME string) or null when unset.
  *
  * @param array<string,mixed> $eventRow
  */
@@ -178,9 +191,31 @@ function events_row_registration_deadline_value(array $eventRow): ?string {
 }
 
 /**
+ * registration_deadline as ISO-8601 with IST offset (e.g. 2026-09-10T07:00:00+05:30).
+ * Use in API responses alongside server_time.
+ */
+function events_row_registration_deadline_iso(array $eventRow): ?string
+{
+    $deadline = events_row_registration_deadline_value($eventRow);
+    if ($deadline === null) {
+        return null;
+    }
+    try {
+        // Stored value is a naive IST wall clock — attach Asia/Kolkata explicitly.
+        $dt = new DateTime(substr($deadline, 0, 19), events_app_timezone());
+        return $dt->format('c');
+    } catch (Throwable $e) {
+        return $deadline;
+    }
+}
+
+/**
  * True when registration join/leave/role-switch should be rejected.
- * Strict rule: closed only when registration_deadline is set AND NOW() >= deadline.
+ * Strict rule: closed only when registration_deadline is set AND now(IST) >= deadline(IST).
  * Do NOT infer from event_date — missing deadline means registration stays open.
+ *
+ * Compares in Asia/Kolkata so php.ini date.timezone (e.g. UTC / Europe/Berlin) cannot
+ * shift a naive "07:00:00" deadline by several hours.
  *
  * @param array<string,mixed> $eventRow registration_deadline optional
  */
@@ -189,11 +224,14 @@ function events_row_registration_closed(array $eventRow): bool {
     if ($deadline === null) {
         return false;
     }
-    $ts = strtotime($deadline);
-    if ($ts === false) {
+    try {
+        $tz = events_app_timezone();
+        $dl = new DateTime(substr($deadline, 0, 19), $tz);
+        $now = new DateTime('now', $tz);
+        return $now >= $dl;
+    } catch (Throwable $e) {
         return false;
     }
-    return $ts <= time();
 }
 
 /**

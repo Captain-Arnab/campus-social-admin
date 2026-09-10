@@ -139,8 +139,7 @@ function events_api_enrich_event_row(array &$row): void
     $row['can_close'] = $close['can_close'];
     $row['close_blockers'] = $close['close_blockers'];
 
-    $deadline = events_row_registration_deadline_value($row);
-    $row['registration_deadline'] = $deadline;
+    $row['registration_deadline'] = events_row_registration_deadline_iso($row);
     $closed = events_row_registration_closed($row);
     $row['registration_closed'] = $closed;
     $row['registration_open'] = !$closed;
@@ -920,7 +919,7 @@ elseif ($method == 'POST') {
             'status'         => 'pending',
             'event_date'     => $start_raw,
             'event_end_date' => ($end_raw !== null && $end_raw !== '') ? $end_raw : null,
-            'registration_deadline' => $create_deadline,
+            'registration_deadline' => events_row_registration_deadline_iso(['registration_deadline' => $create_deadline]),
             'registration_closed' => false,
             'registration_open' => true,
             'category'       => $cat_plain,
