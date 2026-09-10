@@ -1223,6 +1223,48 @@ function cert_achievement_phrase(string $key): string
             .catch(e => Swal.fire('Error', e.message || 'Upload failed', 'error'));
     });
 
+    const SEAL_BOX_W = 180;
+    const SEAL_BOX_H = 70;
+
+    function applySealBoxStyles(wrap) {
+        if (!wrap) return;
+        wrap.style.width = SEAL_BOX_W + 'px';
+        wrap.style.maxWidth = SEAL_BOX_W + 'px';
+        wrap.style.height = SEAL_BOX_H + 'px';
+        wrap.style.maxHeight = SEAL_BOX_H + 'px';
+        wrap.style.overflow = 'hidden';
+        wrap.style.margin = '0 auto 4px';
+        wrap.style.lineHeight = '0';
+        wrap.style.position = 'relative';
+    }
+
+    /** Scale signature to cover the 180×70 box via explicit px (not object-fit). */
+    function fitSealImageToBox(img) {
+        if (!img) return;
+        const nw = img.naturalWidth || 0;
+        const nh = img.naturalHeight || 0;
+        let w = SEAL_BOX_W;
+        let h = SEAL_BOX_H;
+        let ml = 0;
+        let mt = 0;
+        if (nw > 0 && nh > 0) {
+            const scale = Math.max(SEAL_BOX_W / nw, SEAL_BOX_H / nh);
+            w = Math.max(1, Math.round(nw * scale));
+            h = Math.max(1, Math.round(nh * scale));
+            ml = Math.round((SEAL_BOX_W - w) / 2);
+            mt = Math.round(SEAL_BOX_H - h);
+        }
+        img.style.setProperty('width', w + 'px', 'important');
+        img.style.setProperty('height', h + 'px', 'important');
+        img.style.setProperty('max-width', 'none', 'important');
+        img.style.setProperty('max-height', 'none', 'important');
+        img.style.setProperty('object-fit', 'fill', 'important');
+        img.style.margin = mt + 'px 0 0 ' + ml + 'px';
+        img.style.padding = '0';
+        img.style.border = '0';
+        img.style.display = 'block';
+    }
+
     function applySealVisibility() {
         const show = document.getElementById('f_seal_show').checked;
         const sealPart = document.getElementById('cert_seal_wrap');
@@ -1231,23 +1273,14 @@ function cert_achievement_phrase(string $key): string
         const on = !!(show && has);
         if (sealPart) {
             sealPart.style.display = on ? 'block' : 'none';
-            sealPart.style.width = '180px';
-            sealPart.style.maxWidth = '180px';
-            sealPart.style.height = '70px';
-            sealPart.style.maxHeight = '70px';
-            sealPart.style.overflow = 'hidden';
-            sealPart.style.margin = '0 auto 4px';
-            sealPart.style.lineHeight = '0';
+            applySealBoxStyles(sealPart);
         }
         if (img) {
-            img.style.display = on ? 'block' : 'none';
-            img.style.width = '100%';
-            img.style.maxWidth = '180px';
-            img.style.height = '100%';
-            img.style.maxHeight = '70px';
-            img.style.objectFit = 'contain';
-            img.style.objectPosition = 'center bottom';
-            img.style.margin = '0 auto';
+            if (on) {
+                fitSealImageToBox(img);
+            } else {
+                img.style.display = 'none';
+            }
         }
     }
 
@@ -1262,12 +1295,19 @@ function cert_achievement_phrase(string $key): string
         if (u) {
             img.src = u;
             img.style.display = 'block';
-            img.onload = function () { fitCertPreview(); };
+            img.onload = function () {
+                fitSealImageToBox(img);
+                applySealVisibility();
+                fitCertPreview();
+            };
             img.onerror = function () {
                 // Broken path — hide so empty box doesn't confuse
                 img.removeAttribute('src');
                 applySealVisibility();
             };
+            if (img.complete && img.naturalWidth > 0) {
+                fitSealImageToBox(img);
+            }
             if (preview) preview.src = u;
             if (urlInput && !u.startsWith('data:') && urlInput.value.trim() !== u.split('?')[0]) {
                 urlInput.value = u.split('?')[0];
@@ -1461,20 +1501,16 @@ function cert_achievement_phrase(string $key): string
                 const sealWrap = doc.getElementById('cert_seal_wrap');
                 const sealImg = doc.getElementById('cert_seal_img');
                 if (sealWrap && sealWrap.style.display !== 'none') {
-                    sealWrap.style.width = '180px';
-                    sealWrap.style.maxWidth = '180px';
-                    sealWrap.style.height = '70px';
-                    sealWrap.style.maxHeight = '70px';
-                    sealWrap.style.overflow = 'hidden';
-                    sealWrap.style.margin = '0 auto 4px';
+                    applySealBoxStyles(sealWrap);
                 }
                 if (sealImg && sealImg.style.display !== 'none') {
-                    sealImg.style.width = '100%';
-                    sealImg.style.maxWidth = '180px';
-                    sealImg.style.height = '100%';
-                    sealImg.style.maxHeight = '70px';
-                    sealImg.style.objectFit = 'contain';
-                    sealImg.style.objectPosition = 'center bottom';
+                    // Prefer live fitted px sizes — cloned imgs often lack naturalWidth
+                    const liveSeal = document.getElementById('cert_seal_img');
+                    if (liveSeal && liveSeal.style.width) {
+                        sealImg.style.cssText = liveSeal.style.cssText;
+                    } else {
+                        fitSealImageToBox(sealImg);
+                    }
                 }
                 const dateBlock = doc.getElementById('cert_date_block');
                 if (dateBlock) {

@@ -374,10 +374,11 @@
     print-color-adjust: exact;
 }
 
-/* Fixed signature box — uploaded images scale/crop to fit consistently */
+/* Fixed 180×70 signature box — JS sizes the img in px (html2canvas 1.4 ignores object-fit). */
 .cert-sign-img-wrap {
     display: none;
     box-sizing: border-box;
+    position: relative;
     width: 180px;
     height: 70px;
     max-width: 180px;
@@ -391,14 +392,16 @@
 .cert-sign-img-wrap img.cert-seal-img,
 #cert_seal_img.cert-seal-img {
     box-sizing: border-box;
-    width: 100% !important;
-    height: 100% !important;
-    max-width: 180px !important;
-    max-height: 70px !important;
-    object-fit: contain !important;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    object-fit: cover;
     object-position: center bottom;
-    display: block !important;
-    margin: 0 auto;
+    display: block;
+    margin: 0;
+    padding: 0;
+    border: 0;
 }
 
 .cert-sign-line {
