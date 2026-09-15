@@ -329,11 +329,12 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
             letter-spacing: 1px; padding-left: 25px;
         }
         
-        .event-row { background: white; box-shadow: 0 2px 10px rgba(0,0,0,0.01); transition: 0.2s ease; }
-        .event-row:hover { transform: translateY(-2px); box-shadow: var(--hover-shadow); }
+        .event-row { background: white; box-shadow: 0 2px 10px rgba(0,0,0,0.01); transition: box-shadow 0.2s ease; position: relative; z-index: 1; }
+        .event-row:hover { box-shadow: var(--hover-shadow); }
+        .event-row.report-dd-open { z-index: 50; }
         .event-row td { border: none; padding: 12px 25px; vertical-align: middle; }
         .event-row td:first-child { border-top-left-radius: 12px; border-bottom-left-radius: 12px; }
-        .event-row td:last-child { border-top-right-radius: 12px; border-bottom-right-radius: 12px; }
+        .event-row td:last-child { border-top-right-radius: 12px; border-bottom-right-radius: 12px; position: relative; }
 
         .thumbnail-mini { width: 45px; height: 45px; border-radius: 10px; overflow: hidden; background: #f1f1f1; flex-shrink: 0; }
         .thumbnail-mini img { width: 100%; height: 100%; object-fit: cover; }
@@ -355,8 +356,8 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
             padding: 8px;
             border: 1px solid #e9ecef;
             border-radius: 12px;
-            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
-            z-index: 2000;
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+            z-index: 3000 !important;
         }
         .report-dd-row {
             display: flex;
@@ -387,7 +388,7 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
         }
         .report-dd-chip.docx { background: #eef5ff; color: #1d4ed8; border-color: #dbe7ff; }
         .report-dd-chip.pdf { background: #fff1f0; color: #b91c1c; border-color: #ffd6d4; }
-        .report-dd-chip:hover { filter: brightness(0.97); transform: translateY(-1px); }
+        .report-dd-chip:hover { filter: brightness(0.97); }
         .report-dd-chip i { font-size: 0.75rem; }
 
         .btn-search { background: var(--brand-color); color: white; border: none; border-radius: 10px; height: 48px; font-weight: 700; font-size: 0.9rem; }
@@ -699,18 +700,39 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
             root.querySelectorAll('.report-dd-toggle').forEach((btn) => {
                 const existing = bootstrap.Dropdown.getInstance(btn);
                 if (existing) existing.dispose();
+
+                // Prefer opening upward so the menu does not cover action buttons on rows below.
                 new bootstrap.Dropdown(btn, {
                     popperConfig(defaultConfig) {
+                        const modifiers = (defaultConfig.modifiers || [])
+                            .filter((m) => m && m.name !== 'flip' && m.name !== 'preventOverflow')
+                            .concat([
+                                {
+                                    name: 'preventOverflow',
+                                    options: { boundary: 'viewport', padding: 10, altAxis: true },
+                                },
+                                {
+                                    name: 'flip',
+                                    options: {
+                                        fallbackPlacements: ['bottom-end', 'top-start', 'bottom-start', 'left-end'],
+                                    },
+                                },
+                            ]);
                         return {
                             ...defaultConfig,
+                            placement: 'top-end',
                             strategy: 'fixed',
-                            modifiers: [
-                                ...(defaultConfig.modifiers || []),
-                                { name: 'preventOverflow', options: { boundary: 'viewport', padding: 8 } },
-                                { name: 'flip', options: { fallbackPlacements: ['top-end', 'bottom-end', 'top-start'] } },
-                            ],
+                            modifiers,
                         };
                     },
+                });
+
+                btn.addEventListener('show.bs.dropdown', () => {
+                    document.querySelectorAll('tr.report-dd-open').forEach((tr) => tr.classList.remove('report-dd-open'));
+                    btn.closest('tr')?.classList.add('report-dd-open');
+                });
+                btn.addEventListener('hide.bs.dropdown', () => {
+                    btn.closest('tr')?.classList.remove('report-dd-open');
                 });
             });
         }
