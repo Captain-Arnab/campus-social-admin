@@ -19,6 +19,30 @@ $items_per_page = 20;
 $use_pagination = in_array($view, ['past', 'archive'], true);
 
 /**
+ * Compact report download menu (Word + PDF chips per report type).
+ */
+function events_report_dropdown_menu(int $eventId): void
+{
+    $types = [
+        'all' => 'Full Report',
+        'volunteers' => 'Volunteers',
+        'participants' => 'Participants',
+        'joinees' => 'Joinees',
+    ];
+    echo '<ul class="dropdown-menu dropdown-menu-end report-dd-menu">';
+    foreach ($types as $type => $label) {
+        $base = 'download_report.php?event_id=' . $eventId . '&list_type=' . urlencode($type);
+        echo '<li class="report-dd-row">'
+            . '<span class="report-dd-label">' . htmlspecialchars($label) . '</span>'
+            . '<span class="report-dd-actions">'
+            . '<a class="report-dd-chip docx" href="' . htmlspecialchars($base . '&format=docx') . '" title="Download Word"><i class="fas fa-file-word"></i><span>DOCX</span></a>'
+            . '<a class="report-dd-chip pdf" href="' . htmlspecialchars($base . '&format=pdf') . '" title="Download PDF"><i class="fas fa-file-pdf"></i><span>PDF</span></a>'
+            . '</span></li>';
+    }
+    echo '</ul>';
+}
+
+/**
  * Shared filter fragment for events list + AJAX (search, category, date range).
  */
 function events_page_filter_sql(mysqli $conn, string $view, string $search_query, string $category_filter, string $date_filter): string
@@ -176,26 +200,10 @@ if (isset($_GET['ajax_filter'])) {
                     <div class="d-flex gap-2 justify-content-end">
                         <?php if (has_priv('reports')): ?>
                         <div class="dropdown d-inline-block">
-                            <button class="btn-icon btn-download dropdown-toggle" data-bs-toggle="dropdown" title="Download Report" style="font-size:0.7rem;">
+                            <button class="btn-icon btn-download dropdown-toggle report-dd-toggle" data-bs-toggle="dropdown" data-bs-auto-close="true" title="Download Report" style="font-size:0.7rem;" aria-expanded="false">
                                 <i class="fas fa-download"></i>
                             </button>
-                            <ul class="dropdown-menu dropdown-menu-end">
-                                <li><h6 class="dropdown-header py-1">Full Report</h6></li>
-                                <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=all&format=docx"><i class="fas fa-file-word me-2"></i>Word (.docx)</a></li>
-                                <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=all&format=pdf"><i class="fas fa-file-pdf me-2"></i>PDF</a></li>
-                                <li><hr class="dropdown-divider"></li>
-                                <li><h6 class="dropdown-header py-1">Volunteers</h6></li>
-                                <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=volunteers&format=docx"><i class="fas fa-file-word me-2"></i>Word (.docx)</a></li>
-                                <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=volunteers&format=pdf"><i class="fas fa-file-pdf me-2"></i>PDF</a></li>
-                                <li><hr class="dropdown-divider"></li>
-                                <li><h6 class="dropdown-header py-1">Participants</h6></li>
-                                <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=participants&format=docx"><i class="fas fa-file-word me-2"></i>Word (.docx)</a></li>
-                                <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=participants&format=pdf"><i class="fas fa-file-pdf me-2"></i>PDF</a></li>
-                                <li><hr class="dropdown-divider"></li>
-                                <li><h6 class="dropdown-header py-1">Joinees</h6></li>
-                                <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=joinees&format=docx"><i class="fas fa-file-word me-2"></i>Word (.docx)</a></li>
-                                <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=joinees&format=pdf"><i class="fas fa-file-pdf me-2"></i>PDF</a></li>
-                            </ul>
+                            <?php events_report_dropdown_menu((int) $row['id']); ?>
                         </div>
                         <?php endif; ?>
                         <a href="event_details.php?id=<?php echo $row['id']; ?>" class="btn-icon btn-view">
@@ -342,6 +350,46 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
         .btn-download { background: #e8f5e9; color: #2ecc71; }
         .btn-download:hover { background: #2ecc71; color: white; }
 
+        .report-dd-menu {
+            min-width: 260px;
+            padding: 8px;
+            border: 1px solid #e9ecef;
+            border-radius: 12px;
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+            z-index: 2000;
+        }
+        .report-dd-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 8px 6px;
+            border-radius: 8px;
+        }
+        .report-dd-row + .report-dd-row { border-top: 1px solid #f1f3f5; }
+        .report-dd-label {
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: #2d3436;
+            white-space: nowrap;
+        }
+        .report-dd-actions { display: inline-flex; gap: 6px; flex-shrink: 0; }
+        .report-dd-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-size: 0.68rem;
+            font-weight: 700;
+            text-decoration: none;
+            border: 1px solid transparent;
+        }
+        .report-dd-chip.docx { background: #eef5ff; color: #1d4ed8; border-color: #dbe7ff; }
+        .report-dd-chip.pdf { background: #fff1f0; color: #b91c1c; border-color: #ffd6d4; }
+        .report-dd-chip:hover { filter: brightness(0.97); transform: translateY(-1px); }
+        .report-dd-chip i { font-size: 0.75rem; }
+
         .btn-search { background: var(--brand-color); color: white; border: none; border-radius: 10px; height: 48px; font-weight: 700; font-size: 0.9rem; }
         .btn-reset { background: #f1f3f5; color: #636e72; border: none; border-radius: 10px; height: 48px; font-weight: 600; font-size: 0.9rem; }
 
@@ -460,22 +508,35 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
                     <button class="btn-bulk-download dropdown-toggle" data-bs-toggle="dropdown">
                         <i class="fas fa-download me-2"></i>Download Reports
                     </button>
-                    <ul class="dropdown-menu">
-                        <li><h6 class="dropdown-header py-1">Full Report</h6></li>
-                        <li><a class="dropdown-item" href="#" onclick="downloadBulkReports('all','docx');return false;"><i class="fas fa-file-word me-2"></i>Word (.docx)</a></li>
-                        <li><a class="dropdown-item" href="#" onclick="downloadBulkReports('all','pdf');return false;"><i class="fas fa-file-pdf me-2"></i>PDF</a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><h6 class="dropdown-header py-1">Volunteers</h6></li>
-                        <li><a class="dropdown-item" href="#" onclick="downloadBulkReports('volunteers','docx');return false;"><i class="fas fa-file-word me-2"></i>Word (.docx)</a></li>
-                        <li><a class="dropdown-item" href="#" onclick="downloadBulkReports('volunteers','pdf');return false;"><i class="fas fa-file-pdf me-2"></i>PDF</a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><h6 class="dropdown-header py-1">Participants</h6></li>
-                        <li><a class="dropdown-item" href="#" onclick="downloadBulkReports('participants','docx');return false;"><i class="fas fa-file-word me-2"></i>Word (.docx)</a></li>
-                        <li><a class="dropdown-item" href="#" onclick="downloadBulkReports('participants','pdf');return false;"><i class="fas fa-file-pdf me-2"></i>PDF</a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><h6 class="dropdown-header py-1">Joinees</h6></li>
-                        <li><a class="dropdown-item" href="#" onclick="downloadBulkReports('joinees','docx');return false;"><i class="fas fa-file-word me-2"></i>Word (.docx)</a></li>
-                        <li><a class="dropdown-item" href="#" onclick="downloadBulkReports('joinees','pdf');return false;"><i class="fas fa-file-pdf me-2"></i>PDF</a></li>
+                    <ul class="dropdown-menu report-dd-menu">
+                        <li class="report-dd-row">
+                            <span class="report-dd-label">Full Report</span>
+                            <span class="report-dd-actions">
+                                <a class="report-dd-chip docx" href="#" onclick="downloadBulkReports('all','docx');return false;"><i class="fas fa-file-word"></i><span>DOCX</span></a>
+                                <a class="report-dd-chip pdf" href="#" onclick="downloadBulkReports('all','pdf');return false;"><i class="fas fa-file-pdf"></i><span>PDF</span></a>
+                            </span>
+                        </li>
+                        <li class="report-dd-row">
+                            <span class="report-dd-label">Volunteers</span>
+                            <span class="report-dd-actions">
+                                <a class="report-dd-chip docx" href="#" onclick="downloadBulkReports('volunteers','docx');return false;"><i class="fas fa-file-word"></i><span>DOCX</span></a>
+                                <a class="report-dd-chip pdf" href="#" onclick="downloadBulkReports('volunteers','pdf');return false;"><i class="fas fa-file-pdf"></i><span>PDF</span></a>
+                            </span>
+                        </li>
+                        <li class="report-dd-row">
+                            <span class="report-dd-label">Participants</span>
+                            <span class="report-dd-actions">
+                                <a class="report-dd-chip docx" href="#" onclick="downloadBulkReports('participants','docx');return false;"><i class="fas fa-file-word"></i><span>DOCX</span></a>
+                                <a class="report-dd-chip pdf" href="#" onclick="downloadBulkReports('participants','pdf');return false;"><i class="fas fa-file-pdf"></i><span>PDF</span></a>
+                            </span>
+                        </li>
+                        <li class="report-dd-row">
+                            <span class="report-dd-label">Joinees</span>
+                            <span class="report-dd-actions">
+                                <a class="report-dd-chip docx" href="#" onclick="downloadBulkReports('joinees','docx');return false;"><i class="fas fa-file-word"></i><span>DOCX</span></a>
+                                <a class="report-dd-chip pdf" href="#" onclick="downloadBulkReports('joinees','pdf');return false;"><i class="fas fa-file-pdf"></i><span>PDF</span></a>
+                            </span>
+                        </li>
                     </ul>
                 </div>
             </div>
@@ -587,26 +648,10 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
                                 <div class="d-flex gap-2 justify-content-end">
                                     <?php if (has_priv('reports')): ?>
                                     <div class="dropdown d-inline-block">
-                                        <button class="btn-icon btn-download dropdown-toggle" data-bs-toggle="dropdown" title="Download Report" style="font-size:0.7rem;">
+                                        <button class="btn-icon btn-download dropdown-toggle report-dd-toggle" data-bs-toggle="dropdown" data-bs-auto-close="true" title="Download Report" style="font-size:0.7rem;" aria-expanded="false">
                                             <i class="fas fa-download"></i>
                                         </button>
-                                        <ul class="dropdown-menu dropdown-menu-end">
-                                            <li><h6 class="dropdown-header py-1">Full Report</h6></li>
-                                            <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=all&format=docx"><i class="fas fa-file-word me-2"></i>Word (.docx)</a></li>
-                                            <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=all&format=pdf"><i class="fas fa-file-pdf me-2"></i>PDF</a></li>
-                                            <li><hr class="dropdown-divider"></li>
-                                            <li><h6 class="dropdown-header py-1">Volunteers</h6></li>
-                                            <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=volunteers&format=docx"><i class="fas fa-file-word me-2"></i>Word (.docx)</a></li>
-                                            <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=volunteers&format=pdf"><i class="fas fa-file-pdf me-2"></i>PDF</a></li>
-                                            <li><hr class="dropdown-divider"></li>
-                                            <li><h6 class="dropdown-header py-1">Participants</h6></li>
-                                            <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=participants&format=docx"><i class="fas fa-file-word me-2"></i>Word (.docx)</a></li>
-                                            <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=participants&format=pdf"><i class="fas fa-file-pdf me-2"></i>PDF</a></li>
-                                            <li><hr class="dropdown-divider"></li>
-                                            <li><h6 class="dropdown-header py-1">Joinees</h6></li>
-                                            <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=joinees&format=docx"><i class="fas fa-file-word me-2"></i>Word (.docx)</a></li>
-                                            <li><a class="dropdown-item small" href="download_report.php?event_id=<?php echo $row['id']; ?>&list_type=joinees&format=pdf"><i class="fas fa-file-pdf me-2"></i>PDF</a></li>
-                                        </ul>
+                                        <?php events_report_dropdown_menu((int) $row['id']); ?>
                                     </div>
                                     <?php endif; ?>
                                     <a href="event_details.php?id=<?php echo $row['id']; ?>" class="btn-icon btn-view">
@@ -648,6 +693,27 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
         const currentView = <?php echo json_encode($view); ?>;
         let currentPage = <?php echo (int) $page; ?>;
         let requestSequence = 0;
+
+        function initReportDropdowns(root = document) {
+            if (!window.bootstrap || !bootstrap.Dropdown) return;
+            root.querySelectorAll('.report-dd-toggle').forEach((btn) => {
+                const existing = bootstrap.Dropdown.getInstance(btn);
+                if (existing) existing.dispose();
+                new bootstrap.Dropdown(btn, {
+                    popperConfig(defaultConfig) {
+                        return {
+                            ...defaultConfig,
+                            strategy: 'fixed',
+                            modifiers: [
+                                ...(defaultConfig.modifiers || []),
+                                { name: 'preventOverflow', options: { boundary: 'viewport', padding: 8 } },
+                                { name: 'flip', options: { fallbackPlacements: ['top-end', 'bottom-end', 'top-start'] } },
+                            ],
+                        };
+                    },
+                });
+            });
+        }
 
         function renderPagination(total, page, pages) {
             if (!paginationControls || !usePagination) return;
@@ -711,6 +777,7 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
                     if (ec) ec.textContent = String(data.total);
                     renderPagination(data.total, data.page, data.pages);
                     updateCheckboxListeners();
+                    initReportDropdowns(tBody);
                     if (selectAllCheckbox) selectAllCheckbox.checked = false;
                     updateBulkActions();
                 })
@@ -789,6 +856,7 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
         }
 
         updateCheckboxListeners();
+        initReportDropdowns();
     </script>
 </body>
 </html>
