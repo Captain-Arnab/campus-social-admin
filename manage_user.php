@@ -8,36 +8,7 @@ if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     exit();
 }
 require_priv('manage_users');
-
-/**
- * Remove dependent rows for an event so the event (and organizer user) can be deleted
- * even when FKs lack ON DELETE CASCADE (e.g. participant).
- */
-function admin_delete_event_dependents(mysqli $conn, int $event_id): void
-{
-    $queries = [
-        "DELETE FROM favorites WHERE event_id = ?",
-        "DELETE FROM attendees WHERE event_id = ?",
-        "DELETE FROM volunteers WHERE event_id = ?",
-        "DELETE FROM participant WHERE event_id = ?",
-        "DELETE FROM event_status_log WHERE event_id = ?",
-        "DELETE FROM event_certificates WHERE event_id = ?",
-        "DELETE FROM event_editors WHERE event_id = ?",
-        "DELETE FROM event_winners WHERE event_id = ?",
-        "DELETE FROM event_pending_edits WHERE event_id = ?",
-        "DELETE FROM event_review_files WHERE event_id = ?",
-        "DELETE FROM notification_dates WHERE event_id = ?",
-        "DELETE FROM organizer_notifications WHERE event_id = ?",
-    ];
-    foreach ($queries as $sql) {
-        $st = @$conn->prepare($sql);
-        if ($st) {
-            $st->bind_param('i', $event_id);
-            $st->execute();
-            $st->close();
-        }
-    }
-}
+require_once __DIR__ . '/event_delete_helper.php';
 
 function users_redirect(string $msg, string $view = '', int $page = 1, array $filters = []): void
 {

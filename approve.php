@@ -6,6 +6,7 @@ if (file_exists(__DIR__ . '/api/fcm_helper.php')) {
     require_once __DIR__ . '/api/fcm_helper.php';
 }
 require_once __DIR__ . '/api/app_inbox_notifications_helper.php';
+require_once __DIR__ . '/event_delete_helper.php';
 
 if ((!isset($_SESSION['admin']) && !isset($_SESSION['subadmin']))) {
     header("Location: index.php");
@@ -22,6 +23,10 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
 
     // Get current event status before update
     $current_event = $conn->query("SELECT status, event_date, organizer_id, title FROM events WHERE id=$id")->fetch_assoc();
+    if (!$current_event) {
+        header("Location: dashboard.php?msg=error");
+        exit();
+    }
     $old_status = $current_event['status'];
     
     $new_status = '';
@@ -68,6 +73,29 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
             break;
     }
 
+    // Reject = notify organizer, then permanently remove this event from the system
+    if ($action === 'reject') {
+        try {
+            campus_inbox_after_status_change($conn, $id, 'rejected', $old_status, (string) $rejection_reason);
+        } catch (Throwable $e) {
+            error_log('[approve.php] campus_inbox_after_status_change: ' . $e->getMessage());
+        }
+
+        $conn->begin_transaction();
+        try {
+            if (!admin_delete_event_permanently($conn, $id)) {
+                throw new Exception('Event delete failed');
+            }
+            $conn->commit();
+            header("Location: dashboard.php?msg=reject");
+        } catch (Throwable $e) {
+            $conn->rollback();
+            error_log('[approve.php] reject delete: ' . $e->getMessage());
+            header("Location: dashboard.php?msg=error");
+        }
+        exit();
+    }
+
     // Update event status
     if ($action == 'hold') {
         // Update with hold reason and reschedule date; clear any prior rejection note
@@ -82,11 +110,6 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
             $stmt = $conn->prepare('UPDATE events SET event_date = ? WHERE id = ?');
         }
         $stmt->bind_param('si', $new_event_date, $id);
-    } elseif ($action == 'reject') {
-        $empty_date = NULL;
-        $empty_hold = NULL;
-        $stmt = $conn->prepare("UPDATE events SET status=?, hold_reason=?, reschedule_date=?, rejection_reason=? WHERE id=?");
-        $stmt->bind_param("ssssi", $new_status, $empty_hold, $empty_date, $rejection_reason, $id);
     } else {
         // Clear hold + rejection fields when approving
         $empty_date = NULL;
@@ -101,13 +124,11 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
         $log_stmt->bind_param("isssss", $id, $user_type, $username, $old_status, $new_status, $remarks);
         $log_stmt->execute();
 
-        if ($current_event && in_array($action, ['approve', 'reject', 'hold', 'reschedule'], true)) {
+        if ($current_event && in_array($action, ['approve', 'hold', 'reschedule'], true)) {
             $notif_status = ($action === 'reschedule') ? 'rescheduled' : $new_status;
             $admin_note_text = '';
             if ($action === 'hold' && isset($hold_reason)) {
                 $admin_note_text = (string) $hold_reason;
-            } elseif ($action === 'reject' && isset($rejection_reason)) {
-                $admin_note_text = (string) $rejection_reason;
             } elseif ($action === 'reschedule' && isset($reschedule_reason)) {
                 $admin_note_text = (string) $reschedule_reason;
             }
