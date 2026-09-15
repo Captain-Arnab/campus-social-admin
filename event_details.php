@@ -100,6 +100,22 @@ if ($rf_res) {
     }
 }
 
+// Meeting minutes (approved / pending / rejected) — same idea as organizer review
+$meeting_minutes = [];
+$mm_res = @$conn->query(
+    "SELECT mm.*, u.full_name AS submitted_by_name
+     FROM meeting_minutes mm
+     LEFT JOIN users u ON u.id = mm.submitted_by
+     WHERE mm.event_id = $id
+     ORDER BY mm.created_at DESC, mm.id DESC"
+);
+if ($mm_res) {
+    while ($r = $mm_res->fetch_assoc()) {
+        $r['file_url'] = !empty($r['file_path']) ? admin_public_file_url($r['file_path']) : '';
+        $meeting_minutes[] = $r;
+    }
+}
+
 // Pending edit from organizer/editor (when event has editors, edits require admin approval)
 schema_event_pending_edits_ensure_extras($conn);
 $pending_edit = null;
@@ -107,6 +123,9 @@ $pending_edit_res = @$conn->query("SELECT p.*, u.full_name as submitted_by_name 
 if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
     $pending_edit = $pending_edit_res->fetch_assoc();
 }
+
+$has_post_event_docs = !empty($event['organizer_review']) || !empty($review_files) || !empty($meeting_minutes);
+$event_rules = trim((string) ($event['rules'] ?? ''));
 ?>
 
 <!DOCTYPE html>
@@ -123,34 +142,59 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
         :root { 
             --brand-color: #FF5F15; 
             --brand-soft: rgba(255, 95, 21, 0.06);
-            --bg-body: #f8f9fd;
-            --card-shadow: 0 4px 20px rgba(0,0,0,0.03);
+            --bg-body: #f4f6fb;
+            --card-shadow: 0 4px 18px rgba(15, 23, 42, 0.04);
             --success-btn: #2ecc71;
             --hold-color: #f39c12;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --line: #e8ecf3;
         }
         
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-body); color: #2d3436; font-size: 0.85rem; }
-        .container-compact { max-width: 1200px; margin: 30px auto; padding: 0 20px; }
-        .compact-card { background: white; border-radius: 16px; box-shadow: var(--card-shadow); border: 1px solid #f0f0f0; margin-bottom: 20px; overflow: hidden; }
-        .compact-body { padding: 25px; }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-body); color: var(--text-main); font-size: 0.875rem; }
+        .container-compact { max-width: 1180px; margin: 24px auto; padding: 0 16px 40px; }
+        .compact-card { background: white; border-radius: 16px; box-shadow: var(--card-shadow); border: 1px solid var(--line); margin-bottom: 16px; overflow: hidden; }
+        .compact-body { padding: 22px; }
+        .section-label {
+            font-size: 0.62rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+            color: var(--text-muted); margin-bottom: 8px; display: block;
+        }
+        .info-panel {
+            background: #f8fafc; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+        }
+        .info-panel + .info-panel { margin-top: 12px; }
+        .info-panel.review { background: #f0fdf4; border-color: #bbf7d0; }
+        .info-panel.minutes { background: #eff6ff; border-color: #bfdbfe; }
+        .info-panel.attach { background: #fffbeb; border-color: #fde68a; }
+        .info-panel.rules { background: #fafafa; border-color: #e5e7eb; }
+        .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+        @media (max-width: 575.98px) { .meta-grid { grid-template-columns: 1fr; } }
+        .meta-item {
+            background: #f8fafc; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px;
+        }
+        .meta-item .label { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px; }
+        .meta-item .value { font-weight: 600; color: var(--text-main); line-height: 1.35; }
 
+        .hero-layout { display: flex; gap: 18px; align-items: flex-start; margin-bottom: 18px; }
         .banner-container {
-            width: 250px;
-            height: 80%;
-            background: #f1f1f1;
-            border-radius: 12px;
-            margin-bottom: 20px;
-            overflow: hidden;
-            position: relative;
+            width: 140px; height: 180px; flex-shrink: 0;
+            background: #f1f5f9; border-radius: 14px; overflow: hidden; position: relative;
+            border: 1px solid var(--line);
         }
         .banner-img { width: 100%; height: 100%; object-fit: cover; }
         .banner-fallback {
             width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-            background: linear-gradient(135deg, #FF5F15 0%, #FF8A50 100%); color: white;
+            background: linear-gradient(145deg, #FF5F15 0%, #ff8a50 100%); color: white;
+        }
+        .hero-copy { min-width: 0; flex: 1; }
+        @media (max-width: 575.98px) {
+            .hero-layout { flex-direction: column; }
+            .banner-container { width: 100%; height: 200px; }
         }
 
-        .category-pill { background: var(--brand-soft); color: var(--brand-color); padding: 4px 10px; border-radius: 8px; font-weight: 700; font-size: 0.65rem; text-transform: uppercase; margin-bottom: 10px; display: inline-block; }
-        .event-title { font-size: 1.3rem; font-weight: 800; color: #1a1a1a; margin-bottom: 15px; }
+        .category-pill { background: var(--brand-soft); color: var(--brand-color); padding: 4px 10px; border-radius: 8px; font-weight: 700; font-size: 0.65rem; text-transform: uppercase; margin-bottom: 8px; display: inline-block; }
+        .event-title { font-size: 1.35rem; font-weight: 800; color: #0f172a; margin: 0 0 6px; line-height: 1.25; }
+        .hero-sub { color: var(--text-muted); font-size: 0.8rem; margin: 0; }
 
         .checklist-item { display: flex; align-items: center; padding: 10px 15px; border-radius: 10px; background: #f9f9f9; margin-bottom: 8px; transition: 0.2s; cursor: pointer; }
         .checklist-item:hover { background: #fff; border: 1px solid #eee; }
@@ -173,24 +217,34 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
         .status-approved { background: rgba(46, 204, 113, 0.1); color: #2ecc71; border: 2px solid #2ecc71; }
         .status-rejected { background: rgba(231, 76, 60, 0.1); color: #e74c3c; border: 2px solid #e74c3c; }
 
+        .nav-tabs { border-bottom: 1px solid var(--line); }
         .nav-tabs .nav-link {
-            border: none;
-            color: #95a5a6;
-            font-weight: 600;
-            font-size: 0.8rem;
-            padding: 10px 20px;
-            border-bottom: 3px solid transparent;
+            border: none; color: #94a3b8; font-weight: 600; font-size: 0.8rem;
+            padding: 10px 16px; border-bottom: 3px solid transparent;
         }
-        
         .nav-tabs .nav-link.active {
-            color: var(--brand-color);
-            border-bottom-color: var(--brand-color);
-            background: transparent;
+            color: var(--brand-color); border-bottom-color: var(--brand-color); background: transparent;
         }
+        .nav-tabs .nav-link:hover { color: var(--brand-color); }
 
-        .nav-tabs .nav-link:hover {
-            color: var(--brand-color);
+        .side-block-title {
+            font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+            color: var(--text-muted); margin-bottom: 12px;
         }
+        .side-actions { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+        .side-actions .btn-action-main { margin-bottom: 0; }
+        .minutes-status {
+            font-size: 0.65rem; font-weight: 700; text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
+        }
+        .minutes-status.approved { background: #dcfce7; color: #166534; }
+        .minutes-status.pending { background: #fef3c7; color: #92400e; }
+        .minutes-status.rejected { background: #fee2e2; color: #991b1b; }
+        .docs-heading {
+            font-size: 0.78rem; font-weight: 700; color: var(--text-main);
+            margin: 18px 0 10px; padding-top: 4px; border-top: 1px dashed var(--line);
+        }
+        .admin-rail { position: sticky; top: 16px; }
+        @media (max-width: 991.98px) { .admin-rail { position: static; } }
     </style>
 </head>
 <body>
@@ -208,31 +262,41 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
             </span>
         </div>
 
-        <div class="row g-4">
+        <div class="row g-3">
             <!-- Left Side: Event Details -->
             <div class="col-lg-7">
                 <div class="compact-card">
                     <div class="compact-body">
-                        <span class="category-pill"><?php echo $event['category']; ?></span>
-                        <h1 class="event-title"><?php echo $event['title']; ?></h1>
-                        
-                        <div class="banner-container">
-                            <?php if (!empty($banners)): ?>
-                                <img src="./uploads/events/<?php echo $banners[0]; ?>" class="banner-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                                <div class="banner-fallback" style="display:none;"><i class="fas fa-image fa-2x"></i></div>
-                            <?php else: ?>
-                                <div class="banner-fallback"><i class="fas fa-sparkles fa-2x opacity-50"></i></div>
-                            <?php endif; ?>
+                        <div class="hero-layout">
+                            <div class="banner-container">
+                                <?php
+                                $banner_file = '';
+                                if (is_array($banners) && !empty($banners[0])) {
+                                    $banner_file = basename(str_replace('\\', '/', (string) $banners[0]));
+                                }
+                                ?>
+                                <?php if ($banner_file !== ''): ?>
+                                    <img src="uploads/events/<?php echo htmlspecialchars($banner_file, ENT_QUOTES, 'UTF-8'); ?>" class="banner-img" alt="Event poster" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                    <div class="banner-fallback" style="display:none;"><i class="fas fa-image fa-2x"></i></div>
+                                <?php else: ?>
+                                    <div class="banner-fallback"><i class="fas fa-image fa-2x opacity-75"></i></div>
+                                <?php endif; ?>
+                            </div>
+                            <div class="hero-copy">
+                                <span class="category-pill"><?php echo htmlspecialchars((string) $event['category']); ?></span>
+                                <h1 class="event-title"><?php echo htmlspecialchars((string) $event['title']); ?></h1>
+                                <p class="hero-sub"><i class="fas fa-user-tie me-1"></i><?php echo htmlspecialchars((string) $event['organizer_name']); ?></p>
+                            </div>
                         </div>
 
-                        <div class="row g-3 mb-4">
-                            <div class="col-6">
-                                <small class="text-muted fw-bold text-uppercase d-block mb-1" style="font-size: 0.6rem;">Location</small>
-                                <span class="fw-semibold"><i class="fas fa-map-marker-alt text-danger me-1"></i> <?php echo $event['venue']; ?></span>
+                        <div class="meta-grid">
+                            <div class="meta-item">
+                                <div class="label">Location</div>
+                                <div class="value"><i class="fas fa-map-marker-alt text-danger me-1"></i><?php echo htmlspecialchars((string) $event['venue']); ?></div>
                             </div>
-                            <div class="col-6">
-                                <small class="text-muted fw-bold text-uppercase d-block mb-1" style="font-size: 0.6rem;">Timeline</small>
-                                <span class="fw-semibold"><i class="far fa-clock text-primary me-1"></i>
+                            <div class="meta-item">
+                                <div class="label">Timeline</div>
+                                <div class="value"><i class="far fa-clock text-primary me-1"></i>
                                     <?php
                                     $ed_start = date('M d, Y | h:i A', strtotime($event['event_date']));
                                     $ed_end_raw = $event['event_end_date'] ?? null;
@@ -242,74 +306,83 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                                         echo htmlspecialchars($ed_start);
                                     }
                                     ?>
-                                </span>
+                                </div>
                             </div>
-                            <div class="col-12">
-                                <small class="text-muted fw-bold text-uppercase d-block mb-1" style="font-size: 0.6rem;">Registration closes</small>
+                            <div class="meta-item" style="grid-column: 1 / -1;">
+                                <div class="label">Registration closes</div>
+                                <div class="value">
                                 <?php
                                 $reg_dl = $event['registration_deadline'] ?? null;
                                 if (!empty($reg_dl) && $reg_dl !== '0000-00-00 00:00:00') {
                                     $reg_closed = strtotime($reg_dl) <= time();
                                     ?>
-                                    <span class="fw-semibold" style="color:<?php echo $reg_closed ? '#b91c1c' : '#0f766e'; ?>;">
+                                    <span style="color:<?php echo $reg_closed ? '#b91c1c' : '#0f766e'; ?>;">
                                         <i class="fas fa-user-clock me-1"></i>
                                         <?php echo htmlspecialchars(date('M d, Y | h:i A', strtotime($reg_dl))); ?>
                                         <?php if ($reg_closed): ?><span class="badge bg-danger ms-1" style="font-size:0.65rem;">Closed</span><?php endif; ?>
                                     </span>
                                 <?php } else { ?>
-                                    <span class="fw-semibold text-muted"><i class="fas fa-user-clock me-1"></i> Not set</span>
+                                    <span class="text-muted"><i class="fas fa-user-clock me-1"></i> Not set</span>
                                     <?php if (has_priv('events')): ?>
                                     <a href="bulk_registration_deadline.php" class="small ms-1">Set deadline</a>
                                     <?php endif; ?>
                                 <?php } ?>
+                                </div>
                             </div>
                             <?php if($event['reschedule_date']): ?>
-                            <div class="col-12">
-                                <div class="alert alert-warning mb-0">
+                            <div class="meta-item" style="grid-column: 1 / -1;">
+                                <div class="alert alert-warning mb-0 py-2">
                                     <i class="fas fa-calendar-alt me-2"></i><strong>Rescheduled To:</strong> <?php echo date('M d, Y | h:i A', strtotime($event['reschedule_date'])); ?>
                                 </div>
                             </div>
                             <?php endif; ?>
                             <?php if($event['hold_reason']): ?>
-                            <div class="col-12">
-                                <small class="text-muted fw-bold text-uppercase d-block mb-1" style="font-size: 0.6rem;">Hold Reason</small>
-                                <div class="alert alert-warning mb-0">
+                            <div class="meta-item" style="grid-column: 1 / -1;">
+                                <div class="label">Hold Reason</div>
+                                <div class="alert alert-warning mb-0 py-2">
                                     <i class="fas fa-info-circle me-2"></i><?php echo htmlspecialchars($event['hold_reason']); ?>
                                 </div>
                             </div>
                             <?php endif; ?>
                             <?php if (($event['status'] ?? '') === 'rejected' && !empty($event['rejection_reason'])): ?>
-                            <div class="col-12">
-                                <small class="text-muted fw-bold text-uppercase d-block mb-1" style="font-size: 0.6rem;">Rejection Reason</small>
-                                <div class="alert alert-danger mb-0">
+                            <div class="meta-item" style="grid-column: 1 / -1;">
+                                <div class="label">Rejection Reason</div>
+                                <div class="alert alert-danger mb-0 py-2">
                                     <i class="fas fa-times-circle me-2"></i><?php echo htmlspecialchars($event['rejection_reason']); ?>
                                 </div>
                             </div>
                             <?php endif; ?>
                         </div>
 
-                        <div style="background: #fdfdfd; padding: 15px; border-radius: 12px; border: 1px solid #f5f5f5;">
-                            <small class="text-muted fw-bold text-uppercase d-block mb-1" style="font-size: 0.6rem;">About Event</small>
-                            <p class="mb-0 text-secondary"><?php echo nl2br($event['description']); ?></p>
+                        <div class="info-panel">
+                            <span class="section-label">About Event</span>
+                            <p class="mb-0 text-secondary"><?php echo nl2br(htmlspecialchars((string) $event['description'])); ?></p>
                         </div>
 
+                        <?php if ($event_rules !== ''): ?>
+                        <div class="info-panel rules">
+                            <span class="section-label"><i class="fas fa-list-ul me-1"></i>Event Rules</span>
+                            <p class="mb-0 text-secondary"><?php echo nl2br(htmlspecialchars($event_rules)); ?></p>
+                        </div>
+                        <?php endif; ?>
+
+                        <?php if ($has_post_event_docs): ?>
+                        <div class="docs-heading"><i class="fas fa-folder-open me-1 text-muted"></i> Post-event documents</div>
+                        <?php endif; ?>
+
                         <?php if (!empty($event['organizer_review'])): ?>
-                        <div style="background: #f0fdf4; padding: 15px; border-radius: 12px; border: 1px solid #bbf7d0; margin-top: 15px;">
-                            <small class="text-success fw-bold text-uppercase d-block mb-1" style="font-size: 0.6rem;">
-                                <i class="fas fa-star me-1"></i>Organizer Review
-                            </small>
+                        <div class="info-panel review">
+                            <span class="section-label text-success"><i class="fas fa-star me-1"></i>Organizer Review</span>
                             <p class="mb-1 text-secondary"><?php echo nl2br(htmlspecialchars($event['organizer_review'])); ?></p>
-                            <?php if ($event['organizer_review_at']): ?>
+                            <?php if (!empty($event['organizer_review_at'])): ?>
                             <small class="text-muted" style="font-size:0.65rem;">Submitted: <?php echo date('M d, Y h:i A', strtotime($event['organizer_review_at'])); ?></small>
                             <?php endif; ?>
                         </div>
                         <?php endif; ?>
 
                         <?php if (!empty($review_files)): ?>
-                        <div style="background: #fefce8; padding: 15px; border-radius: 12px; border: 1px solid #fde68a; margin-top: 15px;">
-                            <small class="text-warning fw-bold text-uppercase d-block mb-2" style="font-size: 0.6rem;">
-                                <i class="fas fa-paperclip me-1"></i>Review Attachments (<?php echo count($review_files); ?>)
-                            </small>
+                        <div class="info-panel attach">
+                            <span class="section-label" style="color:#b45309;"><i class="fas fa-paperclip me-1"></i>Review Attachments (<?php echo count($review_files); ?>)</span>
                             <div class="d-flex flex-wrap gap-3">
                                 <?php foreach ($review_files as $rf):
                                     $is_image = strpos($rf['file_type'] ?? '', 'image') !== false
@@ -338,6 +411,58 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                                 <?php endforeach; ?>
                             </div>
                         </div>
+                        <?php endif; ?>
+
+                        <?php if (!empty($meeting_minutes)): ?>
+                            <?php foreach ($meeting_minutes as $mm):
+                                $mmStatus = strtolower((string) ($mm['status'] ?? 'pending'));
+                                if (!in_array($mmStatus, ['approved', 'pending', 'rejected'], true)) {
+                                    $mmStatus = 'pending';
+                                }
+                                $mmHref = (string) ($mm['file_url'] ?? '');
+                                $mmPath = (string) ($mm['file_path'] ?? '');
+                                $mmIsImg = $mmPath !== '' && preg_match('/\.(jpe?g|png|gif|webp)$/i', $mmPath);
+                                $mmIsPdf = $mmPath !== '' && preg_match('/\.pdf$/i', $mmPath);
+                                $contentPlain = trim((string) ($mm['content'] ?? ''));
+                                $isPlaceholder = ($contentPlain === '' || strcasecmp($contentPlain, '(See attached minutes file)') === 0);
+                            ?>
+                            <div class="info-panel minutes">
+                                <div class="d-flex align-items-center justify-content-between gap-2 mb-2 flex-wrap">
+                                    <span class="section-label text-primary mb-0"><i class="fas fa-file-alt me-1"></i>Minutes of Meeting</span>
+                                    <span class="minutes-status <?php echo htmlspecialchars($mmStatus); ?>"><?php echo htmlspecialchars($mmStatus); ?></span>
+                                </div>
+                                <?php if (!$isPlaceholder): ?>
+                                <p class="mb-2 text-secondary"><?php echo nl2br(htmlspecialchars($contentPlain)); ?></p>
+                                <?php endif; ?>
+                                <?php if ($mmHref !== ''): ?>
+                                    <?php if ($mmIsImg): ?>
+                                        <a href="<?php echo htmlspecialchars($mmHref); ?>" target="_blank" class="d-inline-block mb-2">
+                                            <img src="<?php echo htmlspecialchars($mmHref); ?>" alt="Minutes attachment"
+                                                 style="max-width:220px;max-height:160px;object-fit:cover;border-radius:10px;border:1px solid #bfdbfe;background:#fff;">
+                                        </a>
+                                    <?php else: ?>
+                                        <a href="<?php echo htmlspecialchars($mmHref); ?>" target="_blank" class="btn btn-sm <?php echo $mmIsPdf ? 'btn-outline-danger' : 'btn-outline-primary'; ?> mb-2">
+                                            <i class="fas fa-<?php echo $mmIsPdf ? 'file-pdf' : 'paperclip'; ?> me-1"></i>
+                                            View attachment
+                                        </a>
+                                    <?php endif; ?>
+                                <?php elseif ($isPlaceholder): ?>
+                                    <p class="mb-2 text-muted small">No text content provided.</p>
+                                <?php endif; ?>
+                                <div class="text-muted" style="font-size:0.65rem;">
+                                    <?php if (!empty($mm['submitted_by_name'])): ?>
+                                        Submitted by <?php echo htmlspecialchars($mm['submitted_by_name']); ?>
+                                        ·
+                                    <?php endif; ?>
+                                    <?php
+                                    $mmWhen = $mm['reviewed_at'] ?: ($mm['created_at'] ?? null);
+                                    if (!empty($mmWhen)) {
+                                        echo date('M d, Y h:i A', strtotime($mmWhen));
+                                    }
+                                    ?>
+                                </div>
+                            </div>
+                            <?php endforeach; ?>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -571,21 +696,25 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
 
             <!-- Right Side: Administration -->
             <div class="col-lg-5">
+                <div class="admin-rail">
                 <div class="compact-card p-4">
-                    <h6 class="fw-bold mb-3"><i class="fas fa-shield-check text-warning me-2"></i> Event Management</h6>
+                    <div class="side-block-title"><i class="fas fa-shield-halved text-warning me-1"></i> Event Management</div>
+                    <div class="side-actions">
                     <a href="edit_event.php?id=<?php echo $id; ?>" class="btn-action-main" style="background: #2d3436; color: white; text-decoration: none; display: inline-block; text-align:center;">
                         <i class="fas fa-pen-to-square me-2"></i>EDIT EVENT DETAILS
                     </a>
-                    <button type="button" class="btn-action-main w-100 mt-2" style="background: #6c5ce7; color: white; border: none;" onclick="openAddEditorsModal()">
+                    <button type="button" class="btn-action-main w-100" style="background: #6c5ce7; color: white; border: none;" onclick="openAddEditorsModal()">
                         <i class="fas fa-user-plus me-2"></i>ADD FACULTY COORDINATORS
                     </button>
                     <?php if ($is_past_event && has_priv('certificates')): ?>
                     <a href="certificate_generator.php?<?php echo http_build_query(['event_id' => $id, 'bulk' => 1]); ?>"
-                       class="btn-action-main w-100 mt-2" style="background: #0f766e; color: white; text-decoration: none; display: inline-block; text-align:center;">
+                       class="btn-action-main w-100" style="background: #0f766e; color: white; text-decoration: none; display: inline-block; text-align:center;">
                         <i class="fas fa-certificates me-2"></i>GENERATE ALL CERTIFICATES
                     </a>
                     <?php endif; ?>
-                    <div id="editorsList" class="mt-2 small">
+                    </div>
+                    <div class="side-block-title mb-2">Faculty coordinators</div>
+                    <div id="editorsList" class="mb-3 small">
                         <?php foreach ($event_editors as $ed): ?>
                         <div class="d-flex align-items-center justify-content-between py-1 px-2 rounded mb-1" style="background: var(--brand-soft);">
                             <span class="fw-semibold"><?php echo htmlspecialchars($ed['full_name']); ?></span>
@@ -597,6 +726,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                         <?php endif; ?>
                     </div>
                     
+                    <div class="side-block-title">Status actions</div>
                     <?php if ($is_pending && has_priv('approve_events')): ?>
                         <!-- Pending Event Management -->
                         <div class="checklist-item" onclick="document.getElementById('checkVenue').click()">
@@ -754,7 +884,7 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
                 <!-- Event Winners -->
                 <?php if (!empty($event_winners)): ?>
                 <div class="compact-card p-4">
-                    <h6 class="fw-bold small text-muted text-uppercase mb-3"><i class="fas fa-trophy text-warning me-1"></i> Event Winners</h6>
+                    <div class="side-block-title"><i class="fas fa-trophy text-warning me-1"></i> Event Winners</div>
                     <?php foreach ($event_winners as $w): 
                         $pos = (int)$w['position'];
                         $posLabel = $pos === 1 ? '1st' : ($pos === 2 ? '2nd' : ($pos === 3 ? '3rd' : $pos . 'th'));
@@ -769,37 +899,38 @@ if ($pending_edit_res && $pending_edit_res->num_rows > 0) {
 
                 <!-- Organizer Info -->
                 <div class="compact-card p-4">
-                    <h6 class="fw-bold small text-muted text-uppercase mb-3">Organizer Insight</h6>
+                    <div class="side-block-title">Organizer</div>
                     <div class="d-flex align-items-center mb-3">
                         <div class="rounded-circle bg-light d-flex align-items-center justify-content-center me-3" style="width: 40px; height: 40px;">
                             <i class="fas fa-user-tie text-brand"></i>
                         </div>
                         <div>
-                            <div class="fw-bold text-dark"><?php echo $event['organizer_name']; ?></div>
-                            <small class="text-muted"><?php echo $event['organizer_email']; ?></small>
+                            <div class="fw-bold text-dark"><?php echo htmlspecialchars((string) $event['organizer_name']); ?></div>
+                            <small class="text-muted"><?php echo htmlspecialchars((string) $event['organizer_email']); ?></small>
                         </div>
                     </div>
                     <div class="small fw-semibold text-muted">
-                        User Global Status: <span class="text-<?php echo $event['user_status'] == 'active' ? 'success' : 'danger'; ?>"><?php echo strtoupper($event['user_status']); ?></span>
+                        Account status: <span class="text-<?php echo $event['user_status'] == 'active' ? 'success' : 'danger'; ?>"><?php echo strtoupper($event['user_status']); ?></span>
                     </div>
                 </div>
 
                 <!-- Status Change Log -->
                 <?php if($status_log->num_rows > 0): ?>
                 <div class="compact-card p-4">
-                    <h6 class="fw-bold small text-muted text-uppercase mb-3">Change History</h6>
+                    <div class="side-block-title">Change History</div>
                     <?php while($log = $status_log->fetch_assoc()): ?>
                     <div class="small mb-2 pb-2 border-bottom">
-                        <div class="fw-bold"><?php echo ucfirst($log['admin_type']); ?>: <?php echo $log['admin_username']; ?></div>
-                        <div class="text-muted"><?php echo $log['old_status']; ?> → <?php echo $log['new_status']; ?></div>
+                        <div class="fw-bold"><?php echo ucfirst($log['admin_type']); ?>: <?php echo htmlspecialchars((string) $log['admin_username']); ?></div>
+                        <div class="text-muted"><?php echo htmlspecialchars((string) $log['old_status']); ?> → <?php echo htmlspecialchars((string) $log['new_status']); ?></div>
                         <div class="text-muted" style="font-size: 0.7rem;"><?php echo date('M d, Y h:i A', strtotime($log['changed_at'])); ?></div>
                         <?php if($log['remarks']): ?>
-                        <div class="mt-1"><small class="badge bg-light text-dark"><?php echo $log['remarks']; ?></small></div>
+                        <div class="mt-1"><small class="badge bg-light text-dark text-wrap text-start"><?php echo htmlspecialchars((string) $log['remarks']); ?></small></div>
                         <?php endif; ?>
                     </div>
                     <?php endwhile; ?>
                 </div>
                 <?php endif; ?>
+                </div><!-- /.admin-rail -->
             </div>
         </div>
     </div>
