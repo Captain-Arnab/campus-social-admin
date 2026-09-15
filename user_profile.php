@@ -55,21 +55,9 @@ $participated_events = $conn->query("
         :root { 
             --brand-color: #FF5F15; 
             --brand-soft: rgba(255, 95, 21, 0.08);
-            --bg-body: #f8f9fd;
-            --card-shadow: 0 10px 40px rgba(0,0,0,0.04);
-            --hover-shadow: 0 15px 35px rgba(0,0,0,0.08);
         }
         
-        body { 
-            font-family: 'Plus Jakarta Sans', sans-serif; 
-            background-color: var(--bg-body); 
-            color: #2d3436;
-        }
-
-        .main-content { margin-left: 280px; padding: 40px; transition: 0.3s; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; box-sizing: border-box; width: 100%; max-width: 100%; } }
-        
-        .profile-card { background: white; border-radius: 24px; border: none; box-shadow: var(--card-shadow); overflow: hidden; }
+        .profile-card { background: white; border-radius: 24px; border: none; overflow: hidden; }
         .profile-header { background: linear-gradient(135deg, #FF5F15 0%, #FF8A50 100%); padding: 45px; color: white; position: relative; }
         
         .avatar-main { 

@@ -158,23 +158,21 @@ $banners = json_decode($event['banners'] ?? '[]');
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/admin-shell.css">
 
     <style>
         :root {
             --brand-color: #FF5F15;
-            --bg-body: #f8f9fd;
-            --card-shadow: 0 4px 20px rgba(0,0,0,0.03);
         }
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-body); color: #2d3436; }
         .container-compact { max-width: 900px; margin: 30px auto; padding: 0 20px; }
-        .compact-card { background: white; border-radius: 16px; box-shadow: var(--card-shadow); border: 1px solid #f0f0f0; overflow: hidden; }
+        .compact-card { background: white; border-radius: 16px; border: 1px solid #e7e5e4; overflow: hidden; }
         .compact-body { padding: 25px; }
         .btn-brand { background: var(--brand-color); color: white; border: none; border-radius: 12px; font-weight: 700; padding: 10px 16px; }
         .btn-brand:hover { background: #e04e0b; color: white; }
         .banner-preview { width: 100%; height: 200px; border-radius: 14px; background: #f1f1f1; overflow: hidden; display:flex; align-items:center; justify-content:center; margin-bottom: 15px; }
         .banner-preview img { width: 100%; height: 100%; object-fit: cover; }
-        .muted-label { font-size: 0.75rem; font-weight: 800; text-transform: uppercase; color: #95a5a6; }
+        .muted-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #FF5F15; }
     </style>
 </head>
 <body>
@@ -192,8 +190,8 @@ $banners = json_decode($event['banners'] ?? '[]');
             <div class="compact-body">
                 <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
                     <div>
-                        <div class="muted-label mb-1">Editing Event</div>
-                        <h4 class="fw-bold mb-0"><?php echo htmlspecialchars($event['title']); ?></h4>
+                        <div class="muted-label mb-1">Editing event</div>
+                        <h4 class="fw-bold mb-0" style="font-family:'Fraunces',Georgia,serif;letter-spacing:-0.02em;"><?php echo htmlspecialchars($event['title']); ?></h4>
                     </div>
                 </div>
 

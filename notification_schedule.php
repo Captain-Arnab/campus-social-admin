@@ -142,11 +142,8 @@ if ($table_ok) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        :root { --brand-color: #FF5F15; --brand-soft: rgba(255, 95, 21, 0.08); --bg-body: #f8f9fd; }
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background: var(--bg-body); color: #2d3436; }
-        .main-content { margin-left: 280px; padding: 40px; transition: 0.3s; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; box-sizing: border-box; width: 100%; max-width: 100%; } }
-        .card-panel { border: none; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.04); }
+        :root { --brand-color: #FF5F15; --brand-soft: rgba(255, 95, 21, 0.08); }
+        .card-panel { border: none; border-radius: 20px; }
         .btn-brand { background: var(--brand-color); color: #fff; border: none; border-radius: 12px; font-weight: 600; }
         .btn-brand:hover { background: #e04e0b; color: #fff; }
     </style>
@@ -155,12 +152,12 @@ if ($table_ok) {
 <?php include 'sidebar.php'; ?>
 
 <div class="main-content">
-    <div class="mb-4">
-        <h4 class="fw-bold m-0">Celebration / notification days</h4>
-        <!-- <p class="text-muted small mb-0">
-            The cron job sends all-user push greetings only on dates listed here (<code class="small">celebration_days</code>).
-            Other dates get no calendar broadcast. Optional: run <code class="small">api/migrations/add_celebration_push_columns.sql</code> to set custom notification title and body per row.
-        </p> -->
+    <div class="page-hero">
+        <div>
+            <div class="page-kicker">Notifications</div>
+            <h1 class="page-title">Celebration days</h1>
+            <p class="page-sub">Dates used for campus-wide greeting broadcasts</p>
+        </div>
     </div>
 
     <?php if (!$table_ok): ?>

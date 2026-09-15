@@ -258,19 +258,18 @@ function cert_achievement_phrase(string $key): string
     <link href="assets/css/certificate_generator.css?v=<?php echo (int) @filemtime(__DIR__ . '/assets/css/certificate_generator.css'); ?>" rel="stylesheet">
     <link href="assets/css/certificate_generator_layout.css?v=<?php echo (int) @filemtime(__DIR__ . '/assets/css/certificate_generator_layout.css'); ?>" rel="stylesheet">
     <style>
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #f8f9fd; }
-        .main-content { margin-left: 280px; padding: 20px 24px; box-sizing: border-box; max-width: 100%; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; } }
+        /* Page chrome comes from admin-shell.css via sidebar */
     </style>
 </head>
 <body>
 <?php include 'sidebar.php'; ?>
 
 <div class="main-content">
-    <div class="cert-gen-page-header d-flex flex-wrap justify-content-between align-items-start gap-2">
+    <div class="page-hero cert-gen-page-header">
         <div>
-            <h4 class="fw-bold m-0">Certificate Generator<?php echo $bulk_mode ? ' — Bulk' : ''; ?></h4>
-            <p class="text-muted small mb-0"><?php echo $bulk_mode
+            <div class="page-kicker">Certificates</div>
+            <h1 class="page-title">Certificate generator<?php echo $bulk_mode ? ' — Bulk' : ''; ?></h1>
+            <p class="page-sub"><?php echo $bulk_mode
                 ? 'Generate All will render and save certificates for every eligible participant/volunteer missing a ready file.'
                 : 'GNU appreciation template — live preview updates as you edit.'; ?></p>
         </div>

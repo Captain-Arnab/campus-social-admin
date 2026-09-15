@@ -282,10 +282,7 @@ try {
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root { --brand-color: #FF5F15; }
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #f8f9fd; color: #2d3436; }
-        .main-content { margin-left: 280px; padding: 20px 24px; box-sizing: border-box; max-width: 100%; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; } }
-        .card-panel { background: #fff; border-radius: 16px; border: 1px solid #f0f0f0; box-shadow: 0 4px 20px rgba(0,0,0,0.03); }
+        .card-panel { background: #fff; border-radius: 16px; border: 1px solid #f0f0f0; }
         .btn-brand { background: var(--brand-color); color: #fff; border: none; border-radius: 12px; font-weight: 700; }
         .btn-brand:hover { background: #e04e0b; color: #fff; }
         .table thead th { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: #95a5a6; font-weight: 800; border-bottom-width: 1px; }
@@ -305,16 +302,14 @@ if (is_readable($sidebar_file)) {
 ?>
 
 <div class="main-content">
-    <div class="mb-3 d-flex flex-wrap justify-content-between align-items-start gap-2">
+    <div class="page-hero">
         <div>
-            <h4 class="fw-bold m-0">Bulk Registration Deadlines</h4>
-            <p class="text-muted small mb-0">
-                Only events with <code>registration_deadline</code> still unset.
-                Registration stays open indefinitely until a deadline is saved.
-            </p>
+            <div class="page-kicker">Event management</div>
+            <h1 class="page-title">Bulk registration deadlines</h1>
+            <p class="page-sub">Only events with registration deadline still unset. Registration stays open until a deadline is saved.</p>
         </div>
-        <a href="events.php?view=live" class="btn btn-outline-secondary btn-sm rounded-3">
-            <i class="fas fa-arrow-left me-1"></i>Events
+        <a href="events.php?view=live" class="btn-site">
+            <i class="fas fa-arrow-left"></i> Events
         </a>
     </div>
 

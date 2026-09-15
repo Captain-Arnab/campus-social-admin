@@ -210,9 +210,6 @@ if ($edit_id > 0) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #f8f9fd; }
-        .main-content { margin-left: 280px; padding: 40px; box-sizing: border-box; width: 100%; max-width: 100%; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; } }
         @media (max-width: 767.98px) {
             .subadmins-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
             .subadmins-table-wrap table { min-width: 640px; }
@@ -223,9 +220,14 @@ if ($edit_id > 0) {
 <body>
 <?php include 'sidebar.php'; ?>
 <div class="main-content">
-    <h4 class="fw-bold">Sub-admin accounts</h4>
-    <p class="text-muted small">Create accounts and assign module access. New passwords are stored securely (hashed).</p>
-    <p class="text-muted small border-start border-3 border-primary ps-3 mb-4"><strong>How to assign a sub-admin:</strong> Sign in with the <strong>main administrator</strong> account (not a sub-admin account). In the sidebar, open <strong>User Administration</strong> → <strong>Sub-admins</strong>. Use <strong>Create sub-admin</strong> to set username, password, full name, and tick the modules this person may access, then submit. They sign in on the same login page as you; inactive accounts cannot log in. Use <strong>Edit</strong> on a row to update profile, optional new password, and privileges in one place.</p>
+    <div class="page-hero">
+        <div>
+            <div class="page-kicker">User administration</div>
+            <h1 class="page-title">Sub-admin accounts</h1>
+            <p class="page-sub">Create accounts and assign module access. New passwords are stored securely (hashed).</p>
+        </div>
+    </div>
+    <p class="text-muted small border-start border-3 ps-3 mb-4" style="border-color: var(--brand) !important;"><strong>How to assign a sub-admin:</strong> Sign in with the <strong>main administrator</strong> account (not a sub-admin account). In the sidebar, open <strong>User Administration</strong> → <strong>Sub-admins</strong>. Use <strong>Create sub-admin</strong> to set username, password, full name, and tick the modules this person may access, then submit. They sign in on the same login page as you; inactive accounts cannot log in. Use <strong>Edit</strong> on a row to update profile, optional new password, and privileges in one place.</p>
 
     <div class="card border-0 shadow-sm rounded-4 mb-4">
         <div class="card-body p-4">

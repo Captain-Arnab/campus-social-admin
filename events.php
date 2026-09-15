@@ -253,31 +253,19 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     
     <style>
         :root { 
             --brand-color: #FF5F15; 
             --brand-soft: rgba(255, 95, 21, 0.08);
-            --bg-body: #f8f9fd;
-            --card-shadow: 0 4px 20px rgba(0,0,0,0.04);
-            --hover-shadow: 0 8px 30px rgba(0,0,0,0.06);
         }
-        
-        body { 
-            font-family: 'Plus Jakarta Sans', sans-serif; 
-            background-color: var(--bg-body); 
-            color: #2d3436;
-        }
-
-        .main-content { margin-left: 280px; padding: 30px; transition: 0.3s; box-sizing: border-box; width: 100%; max-width: 100%; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; } }
 
         /* Bulk Download Section */
         .bulk-actions-bar {
             background: white; border-radius: 16px; padding: 15px 25px;
-            box-shadow: var(--card-shadow); margin-bottom: 20px;
+            margin-bottom: 20px;
             display: none; /* Hidden by default */
         }
         .bulk-actions-bar.active {
@@ -301,7 +289,7 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
 
         .filter-card {
             background: white; border-radius: 16px; padding: 20px;
-            box-shadow: var(--card-shadow); border: 1px solid #f0f0f0; margin-bottom: 25px;
+            border: 1px solid #f0f0f0; margin-bottom: 25px;
         }
 
         .mui-form-group { position: relative; margin-bottom: 0; }
@@ -329,7 +317,7 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
             letter-spacing: 1px; padding-left: 25px;
         }
         
-        .event-row { background: white; box-shadow: 0 2px 10px rgba(0,0,0,0.01); transition: box-shadow 0.2s ease; position: relative; z-index: 1; }
+        .event-row { background: white; transition: box-shadow 0.2s ease; position: relative; z-index: 1; }
         .event-row:hover { box-shadow: var(--hover-shadow); }
         .event-row.report-dd-open { z-index: 50; }
         .event-row td { border: none; padding: 12px 25px; vertical-align: middle; }
@@ -468,12 +456,23 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
     <?php include 'sidebar.php'; ?>
 
     <div class="main-content">
-        <div class="events-page-header d-flex flex-column flex-sm-row flex-sm-wrap justify-content-sm-between align-items-sm-center mb-4">
-            <div class="min-w-0 me-sm-3 mb-2 mb-sm-0">
-                <h5 class="fw-bold m-0 text-dark"><?php echo ucfirst($view); ?> Events</h5>
-                <p class="text-muted small m-0">Manage and monitor student engagement</p>
+        <?php
+        $view_titles = [
+            'pending' => 'Pending review',
+            'live' => 'Live / Upcoming',
+            'hold' => 'On hold',
+            'past' => 'Past events',
+            'archive' => 'Archived (>30 days)',
+        ];
+        $view_title = $view_titles[$view] ?? (ucfirst($view) . ' events');
+        ?>
+        <div class="page-hero events-page-header">
+            <div class="min-w-0 me-sm-3">
+                <div class="page-kicker">Event management</div>
+                <h1 class="page-title"><?php echo htmlspecialchars($view_title); ?></h1>
+                <p class="page-sub">Manage and monitor student engagement</p>
             </div>
-            <span class="badge bg-white text-dark border px-3 py-2 rounded-pill small fw-bold align-self-start align-self-sm-center flex-shrink-0">
+            <span class="page-count flex-shrink-0">
                 Count: <span id="eventCount"><?php echo (int) $total_events; ?></span>
             </span>
         </div>

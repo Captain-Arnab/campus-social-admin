@@ -139,87 +139,12 @@ function dashboard_render_event_card(array $row, string $kind): void
 <head>
     <title>Dashboard | MiCampus</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/admin-shell.css?v=<?php echo (int) @filemtime(__DIR__ . '/assets/css/admin-shell.css'); ?>">
 
     <style>
-        :root {
-            --brand: #FF5F15;
-            --brand-deep: #e04e0b;
-            --ink: #1c1917;
-            --muted: #78716c;
-            --line: #e7e5e4;
-            --surface: #ffffff;
-            --canvas: #f5f2ee;
-            --hold: #c2410c;
-            --shadow: 0 1px 0 rgba(28, 25, 23, 0.04), 0 12px 32px rgba(28, 25, 23, 0.06);
-        }
-
-        body {
-            font-family: 'DM Sans', system-ui, sans-serif;
-            background:
-                radial-gradient(1200px 500px at 10% -10%, rgba(255, 95, 21, 0.08), transparent 55%),
-                radial-gradient(900px 420px at 100% 0%, rgba(28, 25, 23, 0.05), transparent 50%),
-                var(--canvas);
-            color: var(--ink);
-        }
-        .main-content {
-            margin-left: 280px;
-            padding: 36px 40px 56px;
-            box-sizing: border-box;
-            width: 100%;
-            max-width: 100%;
-        }
-        @media (max-width: 991px) {
-            .main-content { margin-left: 0; padding: 16px 14px 40px; }
-        }
-
-        .dash-hero {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: space-between;
-            align-items: flex-end;
-            gap: 16px;
-            margin-bottom: 28px;
-        }
-        .dash-kicker {
-            font-size: 0.72rem;
-            font-weight: 700;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            color: var(--brand);
-            margin-bottom: 6px;
-        }
-        .dash-title {
-            font-family: 'Fraunces', Georgia, serif;
-            font-size: clamp(1.6rem, 2.4vw, 2.1rem);
-            font-weight: 700;
-            letter-spacing: -0.02em;
-            margin: 0;
-            line-height: 1.15;
-        }
-        .dash-sub {
-            margin: 6px 0 0;
-            color: var(--muted);
-            font-size: 0.92rem;
-        }
-        .btn-site {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 16px;
-            border-radius: 999px;
-            border: 1px solid var(--line);
-            background: var(--surface);
-            color: var(--ink);
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 0.85rem;
-            box-shadow: 0 1px 0 rgba(0,0,0,0.03);
-        }
-        .btn-site:hover { border-color: #d6d3d1; color: var(--ink); background: #fff; }
-
         .stat-grid {
             display: grid;
             grid-template-columns: repeat(4, minmax(0, 1fr));

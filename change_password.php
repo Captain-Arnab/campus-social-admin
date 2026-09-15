@@ -84,18 +84,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #f8f9fd; }
-        .main-content { margin-left: 280px; padding: 40px; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; box-sizing: border-box; width: 100%; max-width: 100%; } }
+        /* Page chrome from admin-shell.css */
     </style>
 </head>
 <body>
 <?php include 'sidebar.php'; ?>
 <div class="main-content">
-    <h4 class="fw-bold">Change password</h4>
-    <p class="text-muted small">Use a strong password you do not use elsewhere.</p>
+    <div class="page-hero">
+        <div>
+            <div class="page-kicker">Account</div>
+            <h1 class="page-title">Change password</h1>
+            <p class="page-sub">Use a strong password you do not use elsewhere.</p>
+        </div>
+    </div>
 
-    <div class="card border-0 shadow-sm rounded-4 mt-3" style="max-width: 480px;">
+    <div class="card border-0 shadow-sm rounded-4 mt-1" style="max-width: 480px; border: 1px solid var(--line) !important; box-shadow: var(--shadow) !important;">
         <div class="card-body p-4">
             <form method="post" class="row g-3" id="pwd-form" autocomplete="off">
                 <div class="col-12">

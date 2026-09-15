@@ -99,10 +99,7 @@ $posts = $conn->query("SELECT * FROM ad_posts ORDER BY sort_order ASC, created_a
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
     <style>
-        :root { --brand-color: #FF5F15; --brand-soft: rgba(255, 95, 21, 0.08); --bg-body: #f8f9fd; }
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-body); }
-        .main-content { margin-left: 280px; padding: 30px; box-sizing: border-box; width: 100%; max-width: 100%; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; } }
+        :root { --brand-color: #FF5F15; --brand-soft: rgba(255, 95, 21, 0.08); }
         @media (min-width: 768px) {
             .ad-posts-new-btn { width: auto !important; }
         }
@@ -133,10 +130,11 @@ $posts = $conn->query("SELECT * FROM ad_posts ORDER BY sort_order ASC, created_a
 <body>
     <?php include 'sidebar.php'; ?>
     <div class="main-content">
-        <div class="d-flex flex-column flex-md-row gap-3 justify-content-md-between align-items-md-center mb-4">
+        <div class="page-hero">
             <div class="min-w-0">
-                <h5 class="fw-bold m-0">Advertisement Posts</h5>
-                <p class="text-muted small m-0">Manage home screen banners and ads for the app</p>
+                <div class="page-kicker">Content</div>
+                <h1 class="page-title">Advertisement posts</h1>
+                <p class="page-sub">Manage home screen banners and ads for the app</p>
             </div>
             <button type="button" class="btn btn-brand w-100 ad-posts-new-btn flex-shrink-0" data-bs-toggle="modal" data-bs-target="#createAdModal">
                 <i class="fas fa-plus me-2"></i>New Ad Post

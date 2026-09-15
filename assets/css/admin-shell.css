@@ -1,0 +1,216 @@
+/**
+ * MiCampus admin shell — shared look aligned with dashboard.php
+ * Loaded from sidebar.php (and standalone pages) so every screen matches.
+ */
+:root {
+    --brand: #FF5F15;
+    --brand-deep: #e04e0b;
+    --brand-color: #FF5F15;
+    --brand-hover: #e04e0b;
+    --brand-soft: rgba(255, 95, 21, 0.1);
+    --ink: #1c1917;
+    --muted: #78716c;
+    --line: #e7e5e4;
+    --surface: #ffffff;
+    --canvas: #f5f2ee;
+    --bg-body: #f5f2ee;
+    --hold: #c2410c;
+    --shadow: 0 1px 0 rgba(28, 25, 23, 0.04), 0 12px 32px rgba(28, 25, 23, 0.06);
+    --card-shadow: var(--shadow);
+    --hover-shadow: 0 8px 28px rgba(28, 25, 23, 0.08);
+    --text-main: #1c1917;
+    --text-muted: #78716c;
+    --primary-color: #FF5F15;
+    --primary-hover: #e04e0b;
+}
+
+body {
+    font-family: 'DM Sans', system-ui, sans-serif !important;
+    background:
+        radial-gradient(1200px 500px at 10% -10%, rgba(255, 95, 21, 0.08), transparent 55%),
+        radial-gradient(900px 420px at 100% 0%, rgba(28, 25, 23, 0.05), transparent 50%),
+        var(--canvas) !important;
+    color: var(--ink) !important;
+}
+
+.main-content {
+    margin-left: 280px;
+    padding: 36px 40px 56px !important;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+}
+
+@media (max-width: 991.98px) {
+    .main-content {
+        margin-left: 0 !important;
+        padding: 16px 14px 40px !important;
+    }
+}
+
+/* Page hero — same language as dashboard */
+.page-hero,
+.dash-hero {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 16px;
+    margin-bottom: 28px;
+}
+
+.page-kicker,
+.dash-kicker {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--brand);
+    margin-bottom: 6px;
+}
+
+.page-title,
+.dash-title {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: clamp(1.45rem, 2.2vw, 1.95rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0;
+    line-height: 1.15;
+    color: var(--ink);
+}
+
+.page-sub,
+.dash-sub {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: 0.92rem;
+}
+
+.page-count {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    font-size: 0.82rem;
+    font-weight: 700;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03);
+}
+
+.btn-site {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.85rem;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03);
+}
+
+.btn-site:hover {
+    border-color: #d6d3d1;
+    color: var(--ink);
+    background: #fff;
+}
+
+/* Shared panels / tables / tabs closer to dashboard cards */
+.filter-card,
+.card-panel,
+.settings-card,
+.card-custom,
+.bulk-actions-bar,
+.profile-card {
+    background: var(--surface) !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 18px !important;
+    box-shadow: var(--shadow) !important;
+}
+
+.event-row,
+.user-row {
+    background: var(--surface) !important;
+    border: 1px solid transparent;
+    box-shadow: var(--shadow) !important;
+}
+
+.event-row:hover,
+.user-row:hover {
+    border-color: #d6d3d1;
+    transform: none !important;
+}
+
+.custom-table thead th {
+    color: var(--muted) !important;
+    letter-spacing: 0.06em;
+}
+
+.events-view-tabs,
+.view-tabs {
+    border-bottom-color: var(--line) !important;
+}
+
+.events-view-tab.active,
+.view-tab.active {
+    color: var(--brand) !important;
+    border-bottom-color: var(--brand) !important;
+}
+
+.badge-brand-soft,
+.cat-chip {
+    background: rgba(255, 95, 21, 0.1) !important;
+    color: var(--brand-deep) !important;
+}
+
+.btn-search,
+.btn-brand,
+.btn-brand-solid,
+.btn-bulk-download {
+    background: var(--brand) !important;
+    border-color: var(--brand) !important;
+}
+
+.btn-search:hover,
+.btn-brand:hover,
+.btn-brand-solid:hover,
+.btn-bulk-download:hover {
+    background: var(--brand-deep) !important;
+    border-color: var(--brand-deep) !important;
+    color: #fff !important;
+}
+
+.pagination-controls button:hover:not(:disabled),
+.pagination-controls button.active {
+    background: var(--brand) !important;
+    border-color: var(--brand) !important;
+    color: #fff !important;
+}
+
+.count-badge {
+    background: var(--surface) !important;
+    color: var(--ink) !important;
+    border: 1px solid var(--line);
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03) !important;
+    padding: 8px 14px !important;
+    border-radius: 999px !important;
+    font-weight: 700 !important;
+    font-size: 0.82rem !important;
+}
+
+/* Standalone review / edit pages */
+.container-compact {
+    font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+.compact-card {
+    border-radius: 18px !important;
+    border-color: var(--line) !important;
+    box-shadow: var(--shadow) !important;
+}

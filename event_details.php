@@ -135,25 +135,24 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/admin-shell.css">
     
     <style>
         :root { 
             --brand-color: #FF5F15; 
             --brand-soft: rgba(255, 95, 21, 0.06);
-            --bg-body: #f4f6fb;
-            --card-shadow: 0 4px 18px rgba(15, 23, 42, 0.04);
             --success-btn: #2ecc71;
             --hold-color: #f39c12;
-            --text-main: #1e293b;
-            --text-muted: #64748b;
-            --line: #e8ecf3;
+            --text-main: #1c1917;
+            --text-muted: #78716c;
+            --line: #e7e5e4;
         }
         
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-body); color: var(--text-main); font-size: 0.875rem; }
+        body { font-size: 0.875rem; }
         .container-compact { max-width: 1180px; margin: 24px auto; padding: 0 16px 40px; }
-        .compact-card { background: white; border-radius: 16px; box-shadow: var(--card-shadow); border: 1px solid var(--line); margin-bottom: 16px; overflow: hidden; }
+        .compact-card { background: white; border-radius: 16px; border: 1px solid var(--line); margin-bottom: 16px; overflow: hidden; }
         .compact-body { padding: 22px; }
         .section-label {
             font-size: 0.62rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
@@ -193,7 +192,7 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
         }
 
         .category-pill { background: var(--brand-soft); color: var(--brand-color); padding: 4px 10px; border-radius: 8px; font-weight: 700; font-size: 0.65rem; text-transform: uppercase; margin-bottom: 8px; display: inline-block; }
-        .event-title { font-size: 1.35rem; font-weight: 800; color: #0f172a; margin: 0 0 6px; line-height: 1.25; }
+        .event-title { font-family: 'Fraunces', Georgia, serif; font-size: 1.45rem; font-weight: 700; color: #1c1917; margin: 0 0 6px; line-height: 1.25; letter-spacing: -0.02em; }
         .hero-sub { color: var(--text-muted); font-size: 0.8rem; margin: 0; }
 
         .checklist-item { display: flex; align-items: center; padding: 10px 15px; border-radius: 10px; background: #f9f9f9; margin-bottom: 8px; transition: 0.2s; cursor: pointer; }

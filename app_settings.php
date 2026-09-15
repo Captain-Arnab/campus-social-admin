@@ -64,11 +64,8 @@ if ($logo_res && $row = $logo_res->fetch_assoc()) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        :root { --brand-color: #FF5F15; --brand-soft: rgba(255, 95, 21, 0.08); --bg-body: #f8f9fd; }
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-body); }
-        .main-content { margin-left: 280px; padding: 30px; box-sizing: border-box; width: 100%; max-width: 100%; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; } }
-        .settings-card { background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.04); border: 1px solid #f0f0f0; padding: 30px; margin-bottom: 25px; }
+        :root { --brand-color: #FF5F15; --brand-soft: rgba(255, 95, 21, 0.08); }
+        .settings-card { background: white; border-radius: 16px; border: 1px solid #f0f0f0; padding: 30px; margin-bottom: 25px; }
         .logo-preview { width: 200px; height: 200px; border-radius: 16px; border: 2px dashed #ddd; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #fafafa; }
         @media (max-width: 767.98px) {
             .settings-card { padding: 16px 14px; border-radius: 14px; }
@@ -89,10 +86,11 @@ if ($logo_res && $row = $logo_res->fetch_assoc()) {
 <body>
     <?php include 'sidebar.php'; ?>
     <div class="main-content">
-        <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="page-hero">
             <div>
-                <h5 class="fw-bold m-0">App Settings</h5>
-                <p class="text-muted small m-0">Configure Android app branding</p>
+                <div class="page-kicker">Content</div>
+                <h1 class="page-title">App settings</h1>
+                <p class="page-sub">Configure Android app branding</p>
             </div>
         </div>
 

@@ -180,7 +180,7 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter $filter_s
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     
     <style>
@@ -188,16 +188,9 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter $filter_s
             --brand-color: #FF5F15; 
             --brand-hover: #e04e0b;
             --brand-soft: rgba(255, 95, 21, 0.1);
-            --bg-body: #f8f9fd;
-            --text-main: #2d3436;
-            --text-muted: #636e72;
-            --card-shadow: 0 10px 30px rgba(0,0,0,0.04);
-            --hover-shadow: 0 15px 35px rgba(0,0,0,0.08);
+            --text-main: #1c1917;
+            --text-muted: #78716c;
         }
-        
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-body); color: var(--text-main); }
-        .main-content { margin-left: 280px; padding: 40px; transition: 0.3s; }
-        @media (max-width: 991px) { .main-content { margin-left: 0; padding: 12px; } }
 
         .page-header h4 { font-weight: 700; letter-spacing: -0.5px; }
         .count-badge { background: linear-gradient(135deg, var(--brand-color), #ff8a50); color: white; padding: 8px 16px; border-radius: 30px; box-shadow: 0 4px 15px rgba(255, 95, 21, 0.3); font-weight: 600; font-size: 0.9rem; }
@@ -237,11 +230,11 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter $filter_s
 
         .custom-table { border-collapse: separate; border-spacing: 0 12px; }
         .custom-table thead th { background: transparent; border: none; color: #a0a0a0; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 1px; padding-left: 25px; }
-        .user-row { background: white; box-shadow: 0 5px 20px rgba(0,0,0,0.03); transition: all 0.3s ease; }
+        .user-row { background: white; transition: all 0.3s ease; }
         .user-row td { border: none; padding: 20px 25px; vertical-align: middle; }
         .user-row td:first-child { border-top-left-radius: 16px; border-bottom-left-radius: 16px; }
         .user-row td:last-child { border-top-right-radius: 16px; border-bottom-right-radius: 16px; }
-        .user-row:hover { transform: translateY(-5px); box-shadow: var(--hover-shadow); z-index: 2; }
+        .user-row:hover { box-shadow: var(--hover-shadow); z-index: 2; }
 
         .avatar-circle { width: 45px; height: 45px; border-radius: 50%; background: var(--brand-soft); display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--brand-color); border: 2px solid white; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
         .badge-pill { padding: 6px 12px; border-radius: 20px; font-weight: 600; font-size: 0.75rem; }
@@ -284,12 +277,13 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter $filter_s
     <?php include 'sidebar.php'; ?>
 
     <div class="main-content">
-        <div class="d-flex flex-column flex-sm-row flex-sm-wrap justify-content-sm-between align-items-sm-center gap-3 mb-4 page-header">
+        <div class="page-hero page-header">
             <div class="min-w-0">
-                <h4 class="m-0 text-dark">User Administration</h4>
-                <p class="text-muted small m-0 mt-1">Manage platform participants and moderation</p>
+                <div class="page-kicker">User administration</div>
+                <h1 class="page-title">Platform users</h1>
+                <p class="page-sub">Manage participants and moderation</p>
             </div>
-            <span class="count-badge align-self-start align-self-sm-center flex-shrink-0" id="userCount"><?php echo $total_users; ?> Users</span>
+            <span class="page-count flex-shrink-0" id="userCount"><?php echo $total_users; ?> users</span>
         </div>
 
         <!-- View Tabs -->
