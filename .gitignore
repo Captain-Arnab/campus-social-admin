@@ -10,6 +10,7 @@ api/firebase_config.local.php
 
 # Composer
 api/vendor/
+/vendor/
 
 # Uploads and user-generated content
 uploads/*

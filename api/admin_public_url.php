@@ -12,8 +12,16 @@ function admin_public_base_url(): string
     $host = $_SERVER['HTTP_X_FORWARDED_HOST'] ?? $_SERVER['HTTP_HOST'] ?? 'localhost';
     $script = $_SERVER['SCRIPT_NAME'] ?? '';
     $script = str_replace('\\', '/', $script);
-    // .../admin/api/*.php -> .../admin
-    $adminBase = dirname(dirname($script));
+    $dir = dirname($script);
+
+    // Called from /admin/api/*.php → go up to /admin
+    // Called from /admin/*.php → already in /admin
+    if (basename($dir) === 'api') {
+        $adminBase = dirname($dir);
+    } else {
+        $adminBase = $dir;
+    }
+
     if ($adminBase === '/' || $adminBase === '.' || $adminBase === '') {
         $adminBase = '';
     }

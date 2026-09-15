@@ -243,6 +243,40 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
             font-size: 0.78rem; font-weight: 700; color: var(--text-main);
             margin: 18px 0 10px; padding-top: 4px; border-top: 1px dashed var(--line);
         }
+        .minutes-section {
+            background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; margin-top: 12px; overflow: hidden;
+        }
+        .minutes-section-toggle {
+            width: 100%; border: 0; background: transparent; padding: 14px 16px;
+            display: flex; align-items: center; justify-content: space-between; gap: 10px;
+            font-weight: 700; color: #1d4ed8; text-align: left;
+        }
+        .minutes-section-toggle:hover { background: rgba(59, 130, 246, 0.06); }
+        .minutes-section-toggle .chevron { transition: transform 0.2s; color: #64748b; }
+        .minutes-section-toggle[aria-expanded="true"] .chevron { transform: rotate(180deg); }
+        .minutes-section-body { padding: 0 12px 12px; }
+        .minutes-acc-item {
+            border: 1px solid #dbeafe; border-radius: 10px; background: #fff; margin-bottom: 8px; overflow: hidden;
+        }
+        .minutes-acc-btn {
+            width: 100%; border: 0; background: #fff; padding: 10px 12px;
+            display: flex; align-items: center; justify-content: space-between; gap: 8px;
+            text-align: left; font-size: 0.8rem; font-weight: 600; color: #0f172a;
+        }
+        .minutes-acc-btn:hover { background: #f8fafc; }
+        .minutes-acc-body { padding: 0 12px 12px; border-top: 1px solid #eff6ff; }
+        .minutes-pagination {
+            display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; margin-top: 8px;
+        }
+        .minutes-pagination button {
+            min-width: 34px; height: 34px; border: 1px solid #dbeafe; border-radius: 8px;
+            background: #fff; color: #475569; font-weight: 600; font-size: 0.75rem;
+        }
+        .minutes-pagination button.active,
+        .minutes-pagination button:hover:not(:disabled) {
+            background: #2563eb; border-color: #2563eb; color: #fff;
+        }
+        .minutes-pagination button:disabled { opacity: 0.45; cursor: not-allowed; }
         .admin-rail { position: sticky; top: 16px; }
         @media (max-width: 991.98px) { .admin-rail { position: static; } }
     </style>
@@ -385,11 +419,12 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
                             <span class="section-label" style="color:#b45309;"><i class="fas fa-paperclip me-1"></i>Review Attachments (<?php echo count($review_files); ?>)</span>
                             <div class="d-flex flex-wrap gap-3">
                                 <?php foreach ($review_files as $rf):
+                                    $rfPath = ltrim(str_replace('\\', '/', (string) ($rf['file_path'] ?? '')), '/');
                                     $is_image = strpos($rf['file_type'] ?? '', 'image') !== false
-                                        || preg_match('/\.(jpe?g|png|gif|webp)$/i', (string) ($rf['file_path'] ?? ''));
+                                        || preg_match('/\.(jpe?g|png|gif|webp)$/i', $rfPath);
                                     $is_pdf = strpos($rf['file_type'] ?? '', 'pdf') !== false
-                                        || preg_match('/\.pdf$/i', (string) ($rf['file_path'] ?? ''));
-                                    $href = !empty($rf['file_url']) ? $rf['file_url'] : (string) ($rf['file_path'] ?? '');
+                                        || preg_match('/\.pdf$/i', $rfPath);
+                                    $href = $rfPath !== '' ? $rfPath : (string) ($rf['file_url'] ?? '');
                                 ?>
                                 <div class="text-center" style="max-width: 180px;">
                                     <?php if ($is_image && $href !== ''): ?>
@@ -413,56 +448,94 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
                         </div>
                         <?php endif; ?>
 
-                        <?php if (!empty($meeting_minutes)): ?>
-                            <?php foreach ($meeting_minutes as $mm):
-                                $mmStatus = strtolower((string) ($mm['status'] ?? 'pending'));
-                                if (!in_array($mmStatus, ['approved', 'pending', 'rejected'], true)) {
-                                    $mmStatus = 'pending';
-                                }
-                                $mmHref = (string) ($mm['file_url'] ?? '');
-                                $mmPath = (string) ($mm['file_path'] ?? '');
-                                $mmIsImg = $mmPath !== '' && preg_match('/\.(jpe?g|png|gif|webp)$/i', $mmPath);
-                                $mmIsPdf = $mmPath !== '' && preg_match('/\.pdf$/i', $mmPath);
-                                $contentPlain = trim((string) ($mm['content'] ?? ''));
-                                $isPlaceholder = ($contentPlain === '' || strcasecmp($contentPlain, '(See attached minutes file)') === 0);
-                            ?>
-                            <div class="info-panel minutes">
-                                <div class="d-flex align-items-center justify-content-between gap-2 mb-2 flex-wrap">
-                                    <span class="section-label text-primary mb-0"><i class="fas fa-file-alt me-1"></i>Minutes of Meeting</span>
-                                    <span class="minutes-status <?php echo htmlspecialchars($mmStatus); ?>"><?php echo htmlspecialchars($mmStatus); ?></span>
-                                </div>
-                                <?php if (!$isPlaceholder): ?>
-                                <p class="mb-2 text-secondary"><?php echo nl2br(htmlspecialchars($contentPlain)); ?></p>
-                                <?php endif; ?>
-                                <?php if ($mmHref !== ''): ?>
-                                    <?php if ($mmIsImg): ?>
-                                        <a href="<?php echo htmlspecialchars($mmHref); ?>" target="_blank" class="d-inline-block mb-2">
-                                            <img src="<?php echo htmlspecialchars($mmHref); ?>" alt="Minutes attachment"
-                                                 style="max-width:220px;max-height:160px;object-fit:cover;border-radius:10px;border:1px solid #bfdbfe;background:#fff;">
-                                        </a>
-                                    <?php else: ?>
-                                        <a href="<?php echo htmlspecialchars($mmHref); ?>" target="_blank" class="btn btn-sm <?php echo $mmIsPdf ? 'btn-outline-danger' : 'btn-outline-primary'; ?> mb-2">
-                                            <i class="fas fa-<?php echo $mmIsPdf ? 'file-pdf' : 'paperclip'; ?> me-1"></i>
-                                            View attachment
-                                        </a>
+                        <?php if (!empty($meeting_minutes)):
+                            $mm_total = count($meeting_minutes);
+                            $mm_per_page = 10;
+                            $mm_pages = max(1, (int) ceil($mm_total / $mm_per_page));
+                        ?>
+                        <div class="minutes-section" id="minutesSection">
+                            <button type="button" class="minutes-section-toggle" data-bs-toggle="collapse" data-bs-target="#minutesCollapse" aria-expanded="false" aria-controls="minutesCollapse">
+                                <span><i class="fas fa-file-alt me-2"></i>Minutes of Meeting <span class="badge bg-primary ms-1"><?php echo (int) $mm_total; ?></span></span>
+                                <i class="fas fa-chevron-down chevron"></i>
+                            </button>
+                            <div class="collapse" id="minutesCollapse">
+                                <div class="minutes-section-body">
+                                    <div class="accordion" id="minutesAccordion">
+                                        <?php foreach ($meeting_minutes as $mmIndex => $mm):
+                                            $mmStatus = strtolower((string) ($mm['status'] ?? 'pending'));
+                                            if (!in_array($mmStatus, ['approved', 'pending', 'rejected'], true)) {
+                                                $mmStatus = 'pending';
+                                            }
+                                            $mmPath = (string) ($mm['file_path'] ?? '');
+                                            $mmPathNorm = ltrim(str_replace('\\', '/', $mmPath), '/');
+                                            // Prefer relative admin path (event_details.php lives in /admin)
+                                            $mmHref = $mmPathNorm !== '' ? $mmPathNorm : (string) ($mm['file_url'] ?? '');
+                                            $mmIsImg = $mmPathNorm !== '' && preg_match('/\.(jpe?g|png|gif|webp)$/i', $mmPathNorm);
+                                            $mmIsPdf = $mmPathNorm !== '' && preg_match('/\.pdf$/i', $mmPathNorm);
+                                            $contentPlain = trim((string) ($mm['content'] ?? ''));
+                                            $isPlaceholder = ($contentPlain === '' || strcasecmp($contentPlain, '(See attached minutes file)') === 0);
+                                            $mmWhen = $mm['reviewed_at'] ?: ($mm['created_at'] ?? null);
+                                            $mmWhenLabel = !empty($mmWhen) ? date('M d, Y h:i A', strtotime($mmWhen)) : '';
+                                            $previewSource = $isPlaceholder
+                                                ? (!empty($mmHref) ? 'Attachment available' : 'No content')
+                                                : $contentPlain;
+                                            if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+                                                $preview = mb_strlen($previewSource) > 70 ? (mb_substr($previewSource, 0, 70) . '…') : $previewSource;
+                                            } else {
+                                                $preview = strlen($previewSource) > 70 ? (substr($previewSource, 0, 70) . '…') : $previewSource;
+                                            }
+                                            $itemId = 'mmItem' . (int) $mmIndex;
+                                        ?>
+                                        <div class="minutes-acc-item" data-mm-index="<?php echo (int) $mmIndex; ?>">
+                                            <button type="button" class="minutes-acc-btn" data-bs-toggle="collapse" data-bs-target="#<?php echo $itemId; ?>" aria-expanded="false" aria-controls="<?php echo $itemId; ?>">
+                                                <span class="min-w-0">
+                                                    <span class="d-block text-truncate">#<?php echo (int) ($mmIndex + 1); ?> — <?php echo htmlspecialchars($preview); ?></span>
+                                                    <small class="text-muted fw-normal" style="font-size:0.65rem;">
+                                                        <?php
+                                                        if (!empty($mm['submitted_by_name'])) {
+                                                            echo htmlspecialchars($mm['submitted_by_name']);
+                                                            if ($mmWhenLabel !== '') echo ' · ';
+                                                        }
+                                                        echo htmlspecialchars($mmWhenLabel);
+                                                        ?>
+                                                    </small>
+                                                </span>
+                                                <span class="minutes-status <?php echo htmlspecialchars($mmStatus); ?> flex-shrink-0"><?php echo htmlspecialchars($mmStatus); ?></span>
+                                            </button>
+                                            <div id="<?php echo $itemId; ?>" class="collapse" data-bs-parent="#minutesAccordion">
+                                                <div class="minutes-acc-body pt-2">
+                                                    <?php if (!$isPlaceholder): ?>
+                                                    <p class="mb-2 text-secondary small"><?php echo nl2br(htmlspecialchars($contentPlain)); ?></p>
+                                                    <?php endif; ?>
+                                                    <?php if ($mmHref !== ''): ?>
+                                                        <?php if ($mmIsImg): ?>
+                                                            <a href="<?php echo htmlspecialchars($mmHref); ?>" target="_blank" rel="noopener" class="d-inline-block mb-2">
+                                                                <img src="<?php echo htmlspecialchars($mmHref); ?>" alt="Minutes attachment"
+                                                                     style="max-width:220px;max-height:160px;object-fit:cover;border-radius:10px;border:1px solid #bfdbfe;background:#fff;">
+                                                            </a>
+                                                        <?php else: ?>
+                                                            <a href="<?php echo htmlspecialchars($mmHref); ?>" target="_blank" rel="noopener" class="btn btn-sm <?php echo $mmIsPdf ? 'btn-outline-danger' : 'btn-outline-primary'; ?> mb-2">
+                                                                <i class="fas fa-<?php echo $mmIsPdf ? 'file-pdf' : 'paperclip'; ?> me-1"></i>
+                                                                View attachment
+                                                            </a>
+                                                        <?php endif; ?>
+                                                    <?php elseif ($isPlaceholder): ?>
+                                                        <p class="mb-2 text-muted small">No text content provided.</p>
+                                                    <?php endif; ?>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                    <?php if ($mm_pages > 1): ?>
+                                    <nav class="minutes-pagination" id="minutesPagination" aria-label="Minutes pagination"
+                                         data-total="<?php echo (int) $mm_total; ?>"
+                                         data-per-page="<?php echo (int) $mm_per_page; ?>"
+                                         data-pages="<?php echo (int) $mm_pages; ?>"></nav>
                                     <?php endif; ?>
-                                <?php elseif ($isPlaceholder): ?>
-                                    <p class="mb-2 text-muted small">No text content provided.</p>
-                                <?php endif; ?>
-                                <div class="text-muted" style="font-size:0.65rem;">
-                                    <?php if (!empty($mm['submitted_by_name'])): ?>
-                                        Submitted by <?php echo htmlspecialchars($mm['submitted_by_name']); ?>
-                                        ·
-                                    <?php endif; ?>
-                                    <?php
-                                    $mmWhen = $mm['reviewed_at'] ?: ($mm['created_at'] ?? null);
-                                    if (!empty($mmWhen)) {
-                                        echo date('M d, Y h:i A', strtotime($mmWhen));
-                                    }
-                                    ?>
                                 </div>
                             </div>
-                            <?php endforeach; ?>
+                        </div>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -840,8 +913,9 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
                             <div class="mb-2"><?php echo nl2br(htmlspecialchars($pending_edit['minutes_content'])); ?></div>
                         <?php endif; ?>
                         <?php if (!empty($pending_edit['minutes_file_path'])):
-                            $mmUrl = admin_public_file_url($pending_edit['minutes_file_path']);
-                            $mmIsImg = preg_match('/\.(jpe?g|png|gif|webp)$/i', (string) $pending_edit['minutes_file_path']);
+                            $mmRel = ltrim(str_replace('\\', '/', (string) $pending_edit['minutes_file_path']), '/');
+                            $mmUrl = $mmRel !== '' ? $mmRel : admin_public_file_url($pending_edit['minutes_file_path']);
+                            $mmIsImg = preg_match('/\.(jpe?g|png|gif|webp)$/i', $mmRel);
                         ?>
                             <?php if ($mmIsImg): ?>
                                 <a href="<?php echo htmlspecialchars($mmUrl); ?>" target="_blank">
@@ -959,6 +1033,58 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
             const fromQuery = parseInt(new URLSearchParams(window.location.search).get('id'), 10);
             const fromPhp = <?php echo json_encode((int) $id); ?>;
             window.__eventDetailsEventId = fromQuery > 0 ? fromQuery : (fromPhp > 0 ? fromPhp : 0);
+        })();
+
+        (function initMinutesPagination() {
+            const nav = document.getElementById('minutesPagination');
+            const items = Array.from(document.querySelectorAll('#minutesAccordion .minutes-acc-item'));
+            if (!items.length) return;
+
+            const perPage = nav ? (parseInt(nav.getAttribute('data-per-page'), 10) || 10) : 10;
+            const total = items.length;
+            const pages = Math.max(1, Math.ceil(total / perPage));
+            let page = 1;
+
+            function renderPage(targetPage) {
+                page = Math.min(Math.max(1, targetPage), pages);
+                const start = (page - 1) * perPage;
+                const end = start + perPage;
+                items.forEach((el, idx) => {
+                    el.style.display = (idx >= start && idx < end) ? '' : 'none';
+                });
+                if (!nav) return;
+                nav.innerHTML = '';
+                if (pages <= 1) return;
+
+                const addBtn = (label, target, disabled, active) => {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.textContent = label;
+                    btn.disabled = !!disabled;
+                    if (active) btn.className = 'active';
+                    btn.addEventListener('click', () => renderPage(target));
+                    nav.appendChild(btn);
+                };
+
+                addBtn('Prev', page - 1, page === 1, false);
+                const visible = [...new Set([1, page - 1, page, page + 1, pages])]
+                    .filter(n => n >= 1 && n <= pages)
+                    .sort((a, b) => a - b);
+                let prev = null;
+                visible.forEach(n => {
+                    if (prev !== null && n - prev > 1) {
+                        const dots = document.createElement('span');
+                        dots.textContent = '…';
+                        dots.className = 'px-1 text-muted';
+                        nav.appendChild(dots);
+                    }
+                    addBtn(String(n), n, false, n === page);
+                    prev = n;
+                });
+                addBtn('Next', page + 1, page === pages, false);
+            }
+
+            renderPage(1);
         })();
         function getPageEventId() {
             const id = window.__eventDetailsEventId;
