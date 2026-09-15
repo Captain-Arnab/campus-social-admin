@@ -14,6 +14,9 @@ $view = isset($_GET['view']) ? $_GET['view'] : 'live';
 $search_query = isset($_GET['search']) ? trim((string) $_GET['search']) : '';
 $category_filter = isset($_GET['category']) ? trim((string) $_GET['category']) : '';
 $date_filter = isset($_GET['date']) ? trim((string) $_GET['date']) : '';
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$items_per_page = 20;
+$use_pagination = in_array($view, ['past', 'archive'], true);
 
 /**
  * Shared filter fragment for events list + AJAX (search, category, date range).
@@ -48,35 +51,73 @@ function events_page_filter_sql(mysqli $conn, string $view, string $search_query
     return $filter_sql;
 }
 
+/**
+ * Poster URL for admin listing (files live under admin/uploads/events).
+ */
+function events_list_banner_src(?string $banners_json): ?string
+{
+    $banners = json_decode((string) ($banners_json ?? '[]'), true);
+    if (!is_array($banners) || empty($banners[0])) {
+        return null;
+    }
+    $raw = trim((string) $banners[0]);
+    if ($raw === '') {
+        return null;
+    }
+    if (preg_match('#^https?://#i', $raw)) {
+        return $raw;
+    }
+    $fn = basename(str_replace('\\', '/', $raw));
+    if ($fn === '' || $fn === '.' || $fn === '..') {
+        return null;
+    }
+    return 'uploads/events/' . $fn;
+}
+
+function events_page_date_condition(mysqli $conn, string $view): string
+{
+    if ($view === 'pending') {
+        return "AND e.status = 'pending'";
+    }
+    if ($view === 'past') {
+        return 'AND ' . events_sql_past($conn, 'e') . ' AND COALESCE(e.event_end_date, e.event_date) >= DATE_SUB(NOW(), INTERVAL 30 DAY)';
+    }
+    if ($view === 'archive') {
+        return 'AND ' . events_sql_past($conn, 'e') . ' AND COALESCE(e.event_end_date, e.event_date) < DATE_SUB(NOW(), INTERVAL 30 DAY)';
+    }
+    if ($view === 'hold') {
+        return "AND e.status = 'hold'";
+    }
+    return 'AND ' . events_sql_not_past($conn, 'e') . " AND e.status = 'approved'";
+}
+
 // 1. AJAX HANDLER - Real-time filtering
 if (isset($_GET['ajax_filter'])) {
     $filter_sql = events_page_filter_sql($conn, $view, $search_query, $category_filter, $date_filter);
-    
-    $date_condition = "";
-    if ($view == 'pending') {
-        $date_condition = "AND e.status = 'pending'";
-    } elseif ($view == 'past') {
-        $date_condition = 'AND ' . events_sql_past($conn, 'e') . ' AND COALESCE(e.event_end_date, e.event_date) >= DATE_SUB(NOW(), INTERVAL 30 DAY)';
-    } elseif ($view == 'archive') {
-        $date_condition = 'AND ' . events_sql_past($conn, 'e') . ' AND COALESCE(e.event_end_date, e.event_date) < DATE_SUB(NOW(), INTERVAL 30 DAY)';
-    } elseif ($view == 'hold') {
-        $date_condition = "AND e.status = 'hold'";
-    } else {
-        $date_condition = 'AND ' . events_sql_not_past($conn, 'e') . " AND e.status = 'approved'";
-    }
-
+    $date_condition = events_page_date_condition($conn, $view);
     $order_by = ($view == 'pending') ? "e.created_at DESC" : "e.event_date DESC";
-    $sql = "SELECT e.*, u.full_name as organizer_name 
-            FROM events e 
-            JOIN users u ON e.organizer_id = u.id 
-            WHERE 1=1 $date_condition $filter_sql 
-            ORDER BY $order_by";
-            
+
+    $count_sql = "SELECT COUNT(*) AS total
+            FROM events e
+            JOIN users u ON e.organizer_id = u.id
+            WHERE 1=1 $date_condition $filter_sql";
+    $total_events = (int) (($conn->query($count_sql)->fetch_assoc()['total'] ?? 0));
+    $total_pages = $use_pagination ? max(1, (int) ceil($total_events / $items_per_page)) : 1;
+    $page = $use_pagination ? min($page, $total_pages) : 1;
+    $offset = ($page - 1) * $items_per_page;
+    $limit_sql = $use_pagination ? " LIMIT $items_per_page OFFSET $offset" : '';
+
+    $sql = "SELECT e.*, u.full_name as organizer_name
+            FROM events e
+            JOIN users u ON e.organizer_id = u.id
+            WHERE 1=1 $date_condition $filter_sql
+            ORDER BY $order_by$limit_sql";
     $events = $conn->query($sql);
 
+    ob_start();
     if ($events && $events->num_rows > 0) {
-        while($row = $events->fetch_assoc()) {
-            $banners = json_decode($row['banners'] ?? '[]');
+        while ($row = $events->fetch_assoc()) {
+            $banner_src = events_list_banner_src($row['banners'] ?? '[]');
             ?>
             <tr class="event-row">
                 <td class="ps-4">
@@ -85,8 +126,8 @@ if (isset($_GET['ajax_filter'])) {
                 <td class="min-w-0">
                     <div class="d-flex align-items-start gap-2">
                         <div class="thumbnail-mini me-0 flex-shrink-0">
-                            <?php if(!empty($banners)): ?>
-                                <img src="../uploads/events/<?php echo $banners[0]; ?>" alt="Event" onerror="this.src='../assets/placeholder.png';">
+                            <?php if ($banner_src): ?>
+                                <img src="<?php echo htmlspecialchars($banner_src, ENT_QUOTES, 'UTF-8'); ?>" alt="Event" onerror="this.parentElement.innerHTML='<div class=\'thumb-fallback\'><i class=\'fas fa-image\'></i></div>';">
                             <?php else: ?>
                                 <div class="thumb-fallback"><i class="fas fa-image"></i></div>
                             <?php endif; ?>
@@ -100,7 +141,7 @@ if (isset($_GET['ajax_filter'])) {
                         </div>
                     </div>
                 </td>
-                <td><span class="badge badge-brand-soft"><?php echo $row['category']; ?></span></td>
+                <td><span class="badge badge-brand-soft"><?php echo htmlspecialchars((string) $row['category']); ?></span></td>
                 <td>
                     <div class="d-flex flex-column">
                         <span class="fw-semibold" style="font-size: 0.8rem;"><?php echo date('M d, Y', strtotime($row['event_date'])); ?></span>
@@ -157,26 +198,31 @@ if (isset($_GET['ajax_filter'])) {
     } else {
         echo '<tr><td colspan="6" class="text-center py-5 text-muted fw-light">No events found.</td></tr>';
     }
+    $rows_html = ob_get_clean();
+    header('Content-Type: application/json');
+    echo json_encode([
+        'html' => $rows_html,
+        'total' => $total_events,
+        'page' => $page,
+        'pages' => $total_pages,
+        'paginated' => $use_pagination,
+    ]);
     exit;
 }
 
 // Initial Load logic
 $filter_sql_initial = events_page_filter_sql($conn, $view, $search_query, $category_filter, $date_filter);
-$date_condition = "";
-if ($view == 'pending') {
-    $date_condition = "AND e.status = 'pending'";
-} elseif ($view == 'past') {
-    $date_condition = 'AND ' . events_sql_past($conn, 'e') . ' AND COALESCE(e.event_end_date, e.event_date) >= DATE_SUB(NOW(), INTERVAL 30 DAY)';
-} elseif ($view == 'archive') {
-    $date_condition = 'AND ' . events_sql_past($conn, 'e') . ' AND COALESCE(e.event_end_date, e.event_date) < DATE_SUB(NOW(), INTERVAL 30 DAY)';
-} elseif ($view == 'hold') {
-    $date_condition = "AND e.status = 'hold'";
-} else {
-    $date_condition = 'AND ' . events_sql_not_past($conn, 'e') . " AND e.status = 'approved'";
-}
-
+$date_condition = events_page_date_condition($conn, $view);
 $order_by = ($view == 'pending') ? "e.created_at DESC" : "e.event_date DESC";
-$sql = "SELECT e.*, u.full_name as organizer_name FROM events e JOIN users u ON e.organizer_id = u.id WHERE 1=1 $date_condition $filter_sql_initial ORDER BY $order_by";
+
+$count_sql_initial = "SELECT COUNT(*) AS total FROM events e JOIN users u ON e.organizer_id = u.id WHERE 1=1 $date_condition $filter_sql_initial";
+$total_events = (int) (($conn->query($count_sql_initial)->fetch_assoc()['total'] ?? 0));
+$total_pages = $use_pagination ? max(1, (int) ceil($total_events / $items_per_page)) : 1;
+$page = $use_pagination ? min($page, $total_pages) : 1;
+$offset = ($page - 1) * $items_per_page;
+$limit_sql = $use_pagination ? " LIMIT $items_per_page OFFSET $offset" : '';
+
+$sql = "SELECT e.*, u.full_name as organizer_name FROM events e JOIN users u ON e.organizer_id = u.id WHERE 1=1 $date_condition $filter_sql_initial ORDER BY $order_by$limit_sql";
 $events = $conn->query($sql);
 $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY category ASC");
 ?>
@@ -288,6 +334,12 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
         .btn-search { background: var(--brand-color); color: white; border: none; border-radius: 10px; height: 48px; font-weight: 700; font-size: 0.9rem; }
         .btn-reset { background: #f1f3f5; color: #636e72; border: none; border-radius: 10px; height: 48px; font-weight: 600; font-size: 0.9rem; }
 
+        .pagination-controls { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+        .pagination-controls button { min-width: 38px; height: 38px; border: 1px solid #e9ecef; border-radius: 10px; background: white; color: #636e72; font-weight: 600; }
+        .pagination-controls button:hover:not(:disabled), .pagination-controls button.active { background: var(--brand-color); border-color: var(--brand-color); color: white; }
+        .pagination-controls button:disabled { opacity: 0.45; cursor: not-allowed; }
+        .pagination-ellipsis { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 38px; color: #636e72; }
+
         .events-page-header { gap: 0.75rem; }
         @media (max-width: 767.98px) {
             /* Let the table keep natural column widths — scroll horizontally instead of crushing cells */
@@ -362,7 +414,7 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
                 <p class="text-muted small m-0">Manage and monitor student engagement</p>
             </div>
             <span class="badge bg-white text-dark border px-3 py-2 rounded-pill small fw-bold align-self-start align-self-sm-center flex-shrink-0">
-                Count: <span id="eventCount"><?php echo $events->num_rows; ?></span>
+                Count: <span id="eventCount"><?php echo (int) $total_events; ?></span>
             </span>
         </div>
 
@@ -459,9 +511,9 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
                     </tr>
                 </thead>
                 <tbody id="eventsTableBody">
-                    <?php if($events->num_rows > 0): ?>
-                        <?php while($row = $events->fetch_assoc()): 
-                            $banners = json_decode($row['banners'] ?? '[]');
+                    <?php if($events && $events->num_rows > 0): ?>
+                        <?php while($row = $events->fetch_assoc()):
+                            $banner_src = events_list_banner_src($row['banners'] ?? '[]');
                         ?>
                         <tr class="event-row">
                             <td class="ps-4">
@@ -470,8 +522,8 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
                             <td class="min-w-0">
                                 <div class="d-flex align-items-start gap-2">
                                     <div class="thumbnail-mini me-0 flex-shrink-0">
-                                        <?php if(!empty($banners)): ?>
-                                            <img src="../uploads/events/<?php echo $banners[0]; ?>" alt="Thumb" onerror="this.parentElement.innerHTML='<div class=\'thumb-fallback\'><i class=\'fas fa-image\'></i></div>';">
+                                        <?php if ($banner_src): ?>
+                                            <img src="<?php echo htmlspecialchars($banner_src, ENT_QUOTES, 'UTF-8'); ?>" alt="Thumb" onerror="this.parentElement.innerHTML='<div class=\'thumb-fallback\'><i class=\'fas fa-image\'></i></div>';">
                                         <?php else: ?>
                                             <div class="thumb-fallback"><i class="fas fa-image"></i></div>
                                         <?php endif; ?>
@@ -482,7 +534,7 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
                                     </div>
                                 </div>
                             </td>
-                            <td><span class="badge badge-brand-soft"><?php echo $row['category']; ?></span></td>
+                            <td><span class="badge badge-brand-soft"><?php echo htmlspecialchars((string) $row['category']); ?></span></td>
                             <td>
                                 <div class="d-flex flex-column">
                                     <span class="fw-semibold" style="font-size: 0.8rem;"><?php echo date('M d, Y', strtotime($row['event_date'])); ?></span>
@@ -538,6 +590,9 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
                 </tbody>
             </table>
         </div>
+        <?php if ($use_pagination): ?>
+        <nav class="pagination-controls mt-3" aria-label="Events pagination" id="paginationControls"></nav>
+        <?php endif; ?>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -556,26 +611,97 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
         const cIn = document.getElementById('categoryInput');
         const dIn = document.getElementById('dateInput');
         const tBody = document.getElementById('eventsTableBody');
+        const paginationControls = document.getElementById('paginationControls');
+        const usePagination = <?php echo $use_pagination ? 'true' : 'false'; ?>;
+        const currentView = <?php echo json_encode($view); ?>;
+        let currentPage = <?php echo (int) $page; ?>;
+        let requestSequence = 0;
 
-        function fetchEvents() {
-            const url = `events.php?ajax_filter=1&view=<?php echo $view; ?>&search=${encodeURIComponent(sIn.value)}&category=${encodeURIComponent(cIn.value)}&date=${encodeURIComponent(dIn.value)}`;
-            fetch(url).then(res => res.text()).then(data => { 
-                tBody.innerHTML = data; 
-                updateCheckboxListeners();
-                const n = tBody.querySelectorAll('tr.event-row').length;
-                const ec = document.getElementById('eventCount');
-                if (ec) ec.textContent = String(n);
+        function renderPagination(total, page, pages) {
+            if (!paginationControls || !usePagination) return;
+            paginationControls.innerHTML = '';
+            if (total === 0 || pages <= 1) return;
+
+            const addButton = (label, targetPage, disabled = false, active = false) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.textContent = label;
+                button.disabled = disabled;
+                button.className = active ? 'active' : '';
+                button.setAttribute('aria-label', `Page ${targetPage}`);
+                button.addEventListener('click', () => fetchEvents(targetPage));
+                paginationControls.appendChild(button);
+            };
+
+            addButton('Previous', page - 1, page === 1);
+            const visiblePages = [...new Set([1, page - 2, page - 1, page, page + 1, page + 2, pages])]
+                .filter(pageNumber => pageNumber >= 1 && pageNumber <= pages)
+                .sort((firstPage, secondPage) => firstPage - secondPage);
+            let previousPage = null;
+            visiblePages.forEach(pageNumber => {
+                if (previousPage !== null && pageNumber - previousPage > 1) {
+                    const ellipsis = document.createElement('span');
+                    ellipsis.className = 'pagination-ellipsis';
+                    ellipsis.textContent = '...';
+                    paginationControls.appendChild(ellipsis);
+                }
+                addButton(String(pageNumber), pageNumber, false, pageNumber === page);
+                previousPage = pageNumber;
             });
+            addButton('Next', page + 1, page === pages);
+        }
+
+        function fetchEvents(page = 1) {
+            currentPage = page;
+            const pageParams = new URLSearchParams(window.location.search);
+            pageParams.set('view', currentView);
+            if (usePagination) pageParams.set('page', String(page));
+            else pageParams.delete('page');
+            [['search', sIn.value], ['category', cIn.value], ['date', dIn.value]].forEach(([key, value]) => {
+                if (value) pageParams.set(key, value);
+                else pageParams.delete(key);
+            });
+            window.history.replaceState({}, '', `events.php?${pageParams.toString()}`);
+
+            const sequence = ++requestSequence;
+            const url = `events.php?ajax_filter=1&view=${encodeURIComponent(currentView)}&page=${page}&search=${encodeURIComponent(sIn.value)}&category=${encodeURIComponent(cIn.value)}&date=${encodeURIComponent(dIn.value)}`;
+            tBody.setAttribute('aria-busy', 'true');
+            fetch(url)
+                .then(res => {
+                    if (!res.ok) throw new Error('Could not load events');
+                    return res.json();
+                })
+                .then(data => {
+                    if (sequence !== requestSequence) return;
+                    tBody.innerHTML = data.html;
+                    currentPage = data.page;
+                    const ec = document.getElementById('eventCount');
+                    if (ec) ec.textContent = String(data.total);
+                    renderPagination(data.total, data.page, data.pages);
+                    updateCheckboxListeners();
+                    if (selectAllCheckbox) selectAllCheckbox.checked = false;
+                    updateBulkActions();
+                })
+                .catch(() => {
+                    if (sequence === requestSequence) {
+                        tBody.innerHTML = '<tr><td colspan="6" class="text-center py-5 text-danger">Could not load events.</td></tr>';
+                    }
+                })
+                .finally(() => tBody.removeAttribute('aria-busy'));
+        }
+
+        if (usePagination) {
+            renderPagination(<?php echo (int) $total_events; ?>, <?php echo (int) $page; ?>, <?php echo (int) $total_pages; ?>);
         }
 
         document.getElementById('resetBtn').addEventListener('click', () => {
-            sIn.value = ''; cIn.value = ''; fp.clear(); fetchEvents();
+            sIn.value = ''; cIn.value = ''; fp.clear(); fetchEvents(1);
         });
 
         let timeout = null;
-        sIn.addEventListener('input', () => { clearTimeout(timeout); timeout = setTimeout(fetchEvents, 300); });
-        cIn.addEventListener('change', fetchEvents);
-        dIn.addEventListener('change', fetchEvents);
+        sIn.addEventListener('input', () => { clearTimeout(timeout); timeout = setTimeout(() => fetchEvents(1), 300); });
+        cIn.addEventListener('change', () => fetchEvents(1));
+        dIn.addEventListener('change', () => fetchEvents(1));
 
         // Bulk selection functionality
         const selectAllCheckbox = document.getElementById('selectAll');
@@ -597,39 +723,39 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
         function updateBulkActions() {
             const checkedBoxes = document.querySelectorAll('.event-checkbox:checked');
             const count = checkedBoxes.length;
-            
+
             if (selectedCountSpan) selectedCountSpan.textContent = count;
-            
+
             if (count > 0) {
                 bulkActionsBar?.classList.add('active');
             } else {
                 bulkActionsBar?.classList.remove('active');
             }
-            
-            // Update select all checkbox state
+
             const allCheckboxes = document.querySelectorAll('.event-checkbox');
-            selectAllCheckbox.checked = count === allCheckboxes.length && count > 0;
+            if (selectAllCheckbox) {
+                selectAllCheckbox.checked = count === allCheckboxes.length && count > 0;
+            }
         }
 
         function clearSelection() {
             document.querySelectorAll('.event-checkbox').forEach(cb => cb.checked = false);
-            selectAllCheckbox.checked = false;
+            if (selectAllCheckbox) selectAllCheckbox.checked = false;
             updateBulkActions();
         }
 
         function downloadBulkReports(listType = 'all') {
             const checkedBoxes = document.querySelectorAll('.event-checkbox:checked');
             const eventIds = Array.from(checkedBoxes).map(cb => cb.value);
-            
+
             if (eventIds.length === 0) {
                 alert('Please select at least one event');
                 return;
             }
-            
+
             window.location.href = `download_report.php?event_ids=${eventIds.join(',')}&list_type=${listType}`;
         }
 
-        // Initialize checkbox listeners on page load
         updateCheckboxListeners();
     </script>
 </body>
