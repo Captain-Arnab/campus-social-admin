@@ -428,7 +428,13 @@ if ($method == 'POST') {
                     echo json_encode(["status" => "error", "message" => "Enter the 6-digit OTP"]);
                     exit();
                 }
-                $otp_res = $conn->query("SELECT phone, otp_hash, expires_at, failed_attempts FROM login_otps WHERE user_id = $user_id LIMIT 1");
+                // Expire only by time (10 min from send). Wrong OTP must NOT invalidate the code —
+                // user may retry until expires_at, up to 5 failed attempts.
+                $otp_res = $conn->query(
+                    "SELECT phone, otp_hash, expires_at, failed_attempts,
+                            (expires_at < NOW()) AS is_expired
+                     FROM login_otps WHERE user_id = $user_id LIMIT 1"
+                );
                 if ($otp_res === false) {
                     error_log('[users.php login] login_otps lookup failed: ' . $conn->error);
                     echo json_encode(["status" => "error", "message" => "Login temporarily unavailable. Please try again."]);
@@ -439,17 +445,26 @@ if ($method == 'POST') {
                     exit();
                 }
                 $orow = $otp_res->fetch_assoc();
-                if (strtotime($orow['expires_at']) < time()) {
+                if ((int) ($orow['is_expired'] ?? 0) === 1) {
                     echo json_encode(["status" => "error", "message" => "OTP expired. Request a new code."]);
                     exit();
                 }
-                if ((int)$orow['failed_attempts'] >= 5) {
+                if ((int) ($orow['failed_attempts'] ?? 0) >= 5) {
                     echo json_encode(["status" => "error", "message" => "Too many failed attempts. Request a new OTP."]);
                     exit();
                 }
                 if (!password_verify($otp_input, $orow['otp_hash'])) {
                     $conn->query("UPDATE login_otps SET failed_attempts = failed_attempts + 1 WHERE user_id = $user_id");
-                    echo json_encode(["status" => "error", "message" => "Invalid OTP"]);
+                    $attempts_used = (int) ($orow['failed_attempts'] ?? 0) + 1;
+                    $attempts_left = max(0, 5 - $attempts_used);
+                    echo json_encode([
+                        "status" => "error",
+                        "message" => $attempts_left > 0
+                            ? "Invalid OTP. Please try again. ($attempts_left attempts left)"
+                            : "Too many failed attempts. Request a new OTP.",
+                        "retry_allowed" => $attempts_left > 0,
+                        "attempts_left" => $attempts_left,
+                    ]);
                     exit();
                 }
                 $conn->query("DELETE FROM login_otps WHERE user_id = $user_id");

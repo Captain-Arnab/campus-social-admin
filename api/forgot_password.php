@@ -286,17 +286,32 @@ if ($action === 'verify_otp') {
         exit();
     }
     $otpRow = $row->fetch_assoc();
-    if ((int) $otpRow['failed_attempts'] >= 5) {
-        echo json_encode(['status' => 'error', 'message' => 'Too many failed attempts. Request a new OTP.']);
+    // Expire only after 10 minutes from request — wrong OTP must not kill the code.
+    // Max 5 failed attempts within that window.
+    $expChk = $conn->query(
+        "SELECT (expires_at < NOW()) AS is_expired FROM password_reset_otps WHERE user_id = $user_id LIMIT 1"
+    );
+    $expired = $expChk && ($expChk->fetch_assoc()['is_expired'] ?? 0);
+    if ((int) $expired === 1) {
+        echo json_encode(['status' => 'error', 'message' => 'OTP expired. Request a new one.']);
         exit();
     }
-    if (strtotime($otpRow['expires_at']) < time()) {
-        echo json_encode(['status' => 'error', 'message' => 'OTP expired. Request a new one.']);
+    if ((int) ($otpRow['failed_attempts'] ?? 0) >= 5) {
+        echo json_encode(['status' => 'error', 'message' => 'Too many failed attempts. Request a new OTP.']);
         exit();
     }
     if (!password_verify($otp, $otpRow['otp_hash'])) {
         $conn->query("UPDATE password_reset_otps SET failed_attempts = failed_attempts + 1 WHERE user_id = $user_id");
-        echo json_encode(['status' => 'error', 'message' => 'Invalid OTP']);
+        $attempts_used = (int) ($otpRow['failed_attempts'] ?? 0) + 1;
+        $attempts_left = max(0, 5 - $attempts_used);
+        echo json_encode([
+            'status' => 'error',
+            'message' => $attempts_left > 0
+                ? "Invalid OTP. Please try again. ($attempts_left attempts left)"
+                : 'Too many failed attempts. Request a new OTP.',
+            'retry_allowed' => $attempts_left > 0,
+            'attempts_left' => $attempts_left,
+        ]);
         exit();
     }
 
