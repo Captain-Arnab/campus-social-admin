@@ -170,8 +170,28 @@ $banners = json_decode($event['banners'] ?? '[]');
         .compact-body { padding: 25px; }
         .btn-brand { background: var(--brand-color); color: white; border: none; border-radius: 12px; font-weight: 700; padding: 10px 16px; }
         .btn-brand:hover { background: #e04e0b; color: white; }
-        .banner-preview { width: 100%; height: 200px; border-radius: 14px; background: #f1f1f1; overflow: hidden; display:flex; align-items:center; justify-content:center; margin-bottom: 15px; }
-        .banner-preview img { width: 100%; height: 100%; object-fit: cover; }
+        .banner-preview {
+            width: 100%;
+            max-height: min(70vh, 560px);
+            border-radius: 14px;
+            background: #f5f2ee;
+            border: 1px solid #e7e5e4;
+            overflow: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 15px;
+            padding: 10px;
+        }
+        .banner-preview img {
+            width: auto;
+            max-width: 100%;
+            height: auto;
+            max-height: min(66vh, 520px);
+            object-fit: contain;
+            display: block;
+            border-radius: 8px;
+        }
         .muted-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #FF5F15; }
     </style>
 </head>

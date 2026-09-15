@@ -45,42 +45,38 @@ if ($user_type == 'admin') {
     }
 
     .logo-section {
-        padding: 22px 20px 18px;
+        padding: 24px 20px 20px;
+        text-align: center;
         border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         position: relative;
         flex-shrink: 0;
     }
 
     .logo-section > a {
-        display: flex;
+        display: inline-flex;
         align-items: center;
-        justify-content: flex-start;
+        justify-content: center;
         text-decoration: none;
-        padding: 10px 12px;
-        border-radius: 14px;
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        transition: background 0.2s ease, border-color 0.2s ease;
-    }
-
-    .logo-section > a:hover {
-        background: rgba(255, 255, 255, 0.07);
-        border-color: rgba(255, 95, 21, 0.25);
+        max-width: 100%;
     }
 
     .sidebar-logo {
-        height: 52px;
+        height: 64px;
         width: auto;
-        max-width: 168px;
+        max-width: 200px;
         object-fit: contain;
-        object-position: left center;
         display: block;
-        filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.25));
-        transition: transform 0.2s ease;
+        border-radius: 12px;
+        background: #fff;
+        padding: 8px 12px;
+        box-sizing: content-box;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
 
     .logo-section > a:hover .sidebar-logo {
         transform: translateY(-1px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
     }
 
     .nav-link {
@@ -331,7 +327,7 @@ if ($user_type == 'admin') {
     <!-- Logo Section -->
     <div class="logo-section">
         <a href="dashboard.php" aria-label="MiCampus dashboard">
-            <img src="assets/images/logo-sidebar.png" alt="MiCampus" class="sidebar-logo" width="168" height="52">
+            <img src="assets/images/logo.jpeg" alt="MiCampus" class="sidebar-logo">
         </a>
         <button class="close-sidebar-btn d-lg-none" id="close-sidebar">
             <i class="fas fa-times"></i>

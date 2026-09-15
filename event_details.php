@@ -176,19 +176,27 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
 
         .hero-layout { display: flex; gap: 18px; align-items: flex-start; margin-bottom: 18px; }
         .banner-container {
-            width: 140px; height: 180px; flex-shrink: 0;
-            background: #f1f5f9; border-radius: 14px; overflow: hidden; position: relative;
+            width: 160px; max-height: 280px; flex-shrink: 0;
+            background: #f5f2ee; border-radius: 14px; overflow: hidden; position: relative;
             border: 1px solid var(--line);
+            display: flex; align-items: center; justify-content: center;
+            padding: 6px;
         }
-        .banner-img { width: 100%; height: 100%; object-fit: cover; }
+        .banner-img {
+            width: auto; max-width: 100%;
+            height: auto; max-height: 268px;
+            object-fit: contain; display: block; border-radius: 8px;
+        }
         .banner-fallback {
-            width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+            width: 100%; height: 180px; display: flex; align-items: center; justify-content: center;
             background: linear-gradient(145deg, #FF5F15 0%, #ff8a50 100%); color: white;
+            border-radius: 8px;
         }
         .hero-copy { min-width: 0; flex: 1; }
         @media (max-width: 575.98px) {
             .hero-layout { flex-direction: column; }
-            .banner-container { width: 100%; height: 200px; }
+            .banner-container { width: 100%; max-height: min(70vh, 480px); }
+            .banner-img { max-height: min(66vh, 460px); }
         }
 
         .category-pill { background: var(--brand-soft); color: var(--brand-color); padding: 4px 10px; border-radius: 8px; font-weight: 700; font-size: 0.65rem; text-transform: uppercase; margin-bottom: 8px; display: inline-block; }
