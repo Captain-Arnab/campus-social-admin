@@ -120,17 +120,42 @@ if (isset($_GET['deleted'])) {
     $flash_ok = 'Entry removed.';
 }
 
+$items_per_page = 10;
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$total_rows = 0;
+$total_pages = 1;
 $rows = [];
+
 if ($table_ok) {
+    $count_q = $conn->query('SELECT COUNT(*) AS total FROM celebration_days');
+    if ($count_q) {
+        $total_rows = (int) (($count_q->fetch_assoc()['total'] ?? 0));
+    }
+    $total_pages = max(1, (int) ceil($total_rows / $items_per_page));
+    $page = min($page, $total_pages);
+    $offset = ($page - 1) * $items_per_page;
+
     $sel = $has_push
         ? 'id, occasion_name, push_title, push_message, occasion_date, is_fixed, is_tentative, sort_order, created_at'
         : 'id, occasion_name, occasion_date, is_fixed, is_tentative, sort_order, created_at';
-    $q = $conn->query("SELECT {$sel} FROM celebration_days ORDER BY occasion_date DESC, id DESC LIMIT 300");
+    $q = $conn->query(
+        "SELECT {$sel} FROM celebration_days ORDER BY occasion_date DESC, id DESC LIMIT {$items_per_page} OFFSET {$offset}"
+    );
     if ($q) {
         while ($r = $q->fetch_assoc()) {
             $rows[] = $r;
         }
     }
+}
+
+function celebration_page_url(int $page): string
+{
+    $params = [];
+    if ($page > 1) {
+        $params['page'] = $page;
+    }
+    $qs = http_build_query($params);
+    return 'notification_schedule.php' . ($qs !== '' ? '?' . $qs : '');
 }
 ?>
 <!DOCTYPE html>
@@ -146,6 +171,18 @@ if ($table_ok) {
         .card-panel { border: none; border-radius: 20px; }
         .btn-brand { background: var(--brand-color); color: #fff; border: none; border-radius: 12px; font-weight: 600; }
         .btn-brand:hover { background: #e04e0b; color: #fff; }
+        .pagination-controls { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; align-items: center; }
+        .pagination-controls a,
+        .pagination-controls span.page-btn {
+            min-width: 38px; height: 38px; border: 1px solid #e9ecef; border-radius: 10px;
+            background: white; color: #636e72; font-weight: 600; text-decoration: none;
+            display: inline-flex; align-items: center; justify-content: center; padding: 0 10px;
+        }
+        .pagination-controls a:hover { background: var(--brand-color); border-color: var(--brand-color); color: white; }
+        .pagination-controls a.active { background: var(--brand-color); border-color: var(--brand-color); color: white; }
+        .pagination-controls span.page-btn.disabled { opacity: 0.45; pointer-events: none; }
+        .pagination-ellipsis { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 38px; color: #636e72; }
+        .list-meta { font-size: 0.8rem; color: #78716c; font-weight: 600; }
     </style>
 </head>
 <body>
@@ -225,7 +262,20 @@ if ($table_ok) {
             <div class="col-lg-7">
                 <div class="card card-panel">
                     <div class="card-body p-4">
-                        <h6 class="fw-bold mb-3"><i class="fas fa-list me-2"></i>Current list (latest 300)</h6>
+                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                            <h6 class="fw-bold m-0"><i class="fas fa-list me-2"></i>Current list</h6>
+                            <span class="list-meta">
+                                <?php
+                                if ($total_rows === 0) {
+                                    echo '0 items';
+                                } else {
+                                    $from = $offset + 1;
+                                    $to = min($offset + $items_per_page, $total_rows);
+                                    echo htmlspecialchars("{$from}–{$to} of {$total_rows}");
+                                }
+                                ?>
+                            </span>
+                        </div>
                         <div class="table-responsive">
                             <table class="table table-hover align-middle mb-0 small">
                                 <thead>
@@ -277,6 +327,44 @@ if ($table_ok) {
                                 </tbody>
                             </table>
                         </div>
+
+                        <?php if ($total_pages > 1): ?>
+                        <nav class="pagination-controls mt-3" aria-label="Celebration days pagination">
+                            <?php if ($page > 1): ?>
+                                <a href="<?php echo htmlspecialchars(celebration_page_url($page - 1)); ?>" aria-label="Previous">&lsaquo;</a>
+                            <?php else: ?>
+                                <span class="page-btn disabled" aria-disabled="true">&lsaquo;</span>
+                            <?php endif; ?>
+
+                            <?php
+                            $window = 2;
+                            $start = max(1, $page - $window);
+                            $end = min($total_pages, $page + $window);
+                            if ($start > 1) {
+                                echo '<a href="' . htmlspecialchars(celebration_page_url(1)) . '">1</a>';
+                                if ($start > 2) {
+                                    echo '<span class="pagination-ellipsis">…</span>';
+                                }
+                            }
+                            for ($p = $start; $p <= $end; $p++) {
+                                $cls = $p === $page ? ' active' : '';
+                                echo '<a class="' . trim($cls) . '" href="' . htmlspecialchars(celebration_page_url($p)) . '">' . $p . '</a>';
+                            }
+                            if ($end < $total_pages) {
+                                if ($end < $total_pages - 1) {
+                                    echo '<span class="pagination-ellipsis">…</span>';
+                                }
+                                echo '<a href="' . htmlspecialchars(celebration_page_url($total_pages)) . '">' . $total_pages . '</a>';
+                            }
+                            ?>
+
+                            <?php if ($page < $total_pages): ?>
+                                <a href="<?php echo htmlspecialchars(celebration_page_url($page + 1)); ?>" aria-label="Next">&rsaquo;</a>
+                            <?php else: ?>
+                                <span class="page-btn disabled" aria-disabled="true">&rsaquo;</span>
+                            <?php endif; ?>
+                        </nav>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>

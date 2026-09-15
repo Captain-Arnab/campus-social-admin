@@ -45,25 +45,42 @@ if ($user_type == 'admin') {
     }
 
     .logo-section {
-        padding: 30px 20px 25px;
-        text-align: center;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        background: rgba(255, 95, 21, 0.03);
+        padding: 22px 20px 18px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         position: relative;
+        flex-shrink: 0;
+    }
+
+    .logo-section > a {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        text-decoration: none;
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        transition: background 0.2s ease, border-color 0.2s ease;
+    }
+
+    .logo-section > a:hover {
+        background: rgba(255, 255, 255, 0.07);
+        border-color: rgba(255, 95, 21, 0.25);
     }
 
     .sidebar-logo {
-        height: 60px;
+        height: 52px;
         width: auto;
-        max-width: 180px;
+        max-width: 168px;
         object-fit: contain;
-        filter: brightness(1.1);
-        transition: all 0.3s ease;
+        object-position: left center;
+        display: block;
+        filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.25));
+        transition: transform 0.2s ease;
     }
 
-    .sidebar-logo:hover {
-        transform: scale(1.05);
-        filter: brightness(1.2);
+    .logo-section > a:hover .sidebar-logo {
+        transform: translateY(-1px);
     }
 
     .nav-link {
@@ -229,8 +246,8 @@ if ($user_type == 'admin') {
 
     .close-sidebar-btn {
         position: absolute;
-        top: 35px;
-        right: 15px;
+        top: 28px;
+        right: 14px;
         background: rgba(255, 255, 255, 0.05);
         border: 1px solid rgba(255, 255, 255, 0.1);
         color: #9ca3af;
@@ -313,8 +330,8 @@ if ($user_type == 'admin') {
 <div id="sidebar-wrapper" class="d-flex flex-column">
     <!-- Logo Section -->
     <div class="logo-section">
-        <a href="dashboard.php">
-            <img src="assets/images/logo.jpeg" alt="Campus Social" class="sidebar-logo">
+        <a href="dashboard.php" aria-label="MiCampus dashboard">
+            <img src="assets/images/logo-sidebar.png" alt="MiCampus" class="sidebar-logo" width="168" height="52">
         </a>
         <button class="close-sidebar-btn d-lg-none" id="close-sidebar">
             <i class="fas fa-times"></i>
