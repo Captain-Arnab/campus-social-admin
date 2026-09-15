@@ -148,6 +148,7 @@ if ($action === 'approve') {
                 'event_id' => $id,
                 'minutes_id' => $minutesId,
                 'title' => $titlePlain,
+                'content' => $minutesContent,
             ]);
         }
 

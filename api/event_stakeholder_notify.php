@@ -132,13 +132,45 @@ function process_job_minutes_approved_notify($conn, array $payload): void
         throw new InvalidArgumentException('event_id required');
     }
     $titlePlain = (string) ($payload['title'] ?? 'Event');
+    $content = trim((string) ($payload['content'] ?? ''));
+    if ($content === '' && $minutesId > 0) {
+        $r = @$conn->query('SELECT content FROM meeting_minutes WHERE id = ' . (int) $minutesId . ' LIMIT 1');
+        if ($r && ($row = $r->fetch_assoc())) {
+            $content = trim((string) ($row['content'] ?? ''));
+        }
+    }
+
+    $placeholder = (strcasecmp($content, '(See attached minutes file)') === 0);
+    if ($content === '' || $placeholder) {
+        $body = 'Meeting minutes for "' . $titlePlain . '" are now available.'
+            . ($placeholder ? ' See the attached minutes file in the event.' : '');
+    } else {
+        // Keep push/inbox body readable; full text also goes in data payload.
+        if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+            $body = mb_strlen($content) > 500 ? (mb_substr($content, 0, 497) . '…') : $content;
+        } else {
+            $body = strlen($content) > 500 ? (substr($content, 0, 497) . '…') : $content;
+        }
+    }
+
+    $auto = !empty($payload['auto_published']);
+    $notifTitle = $auto
+        ? ('Meeting minutes: ' . $titlePlain)
+        : ('Minutes of meeting: ' . $titlePlain);
+
     campus_notify_event_stakeholders(
         $conn,
         $eventId,
         'minutes_approved',
-        'Minutes of meeting approved',
-        'Meeting minutes for "' . $titlePlain . '" have been approved.',
-        ['minutes_id' => $minutesId, 'kind' => 'minutes_approved_notify']
+        $notifTitle,
+        $body,
+        [
+            'minutes_id' => $minutesId,
+            'kind' => 'minutes_approved_notify',
+            'content' => $content,
+            'minutes_content' => $content,
+            'auto_published' => $auto ? '1' : '0',
+        ]
     );
 }
 

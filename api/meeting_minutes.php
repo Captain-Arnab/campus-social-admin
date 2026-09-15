@@ -1,15 +1,18 @@
 <?php
 /**
- * Meeting minutes workflow — consolidated into event_pending_edits reapproval.
+ * Meeting minutes workflow.
  *
  * POST ?action=submit|approve|reject
  * GET  ?action=list|get
  *
- * Host submit stages minutes onto event_pending_edits and flips the event to
- * pending (same C2 pipeline as other post-approval edits). Live minutes rows
- * are written only when admin approves the pending edit (or legacy approve here).
+ * Organizer submit: writes an approved meeting_minutes row immediately and notifies
+ * stakeholders with the minutes content (no admin reapproval / event status flip).
  *
- * Host = organizer_id + event_editors.
+ * Editor submit: still stages onto event_pending_edits and flips the event to pending
+ * (same C2 pipeline as other post-approval edits). Live minutes rows are written when
+ * admin approves the pending edit (or via legacy approve here).
+ *
+ * Host = organizer_id + event_editors (editors still need approval).
  *
  * Field resolution (event_id / user_id): JSON body, $_POST (multipart/urlencoded),
  * query string, camelCase aliases, organizer_id/submitted_by, then Bearer/X-User-Id.
@@ -252,6 +255,15 @@ function mm_is_host($conn, int $event_id, int $user_id): bool
     return $e && $e->num_rows > 0;
 }
 
+function mm_is_organizer($conn, int $event_id, int $user_id): bool
+{
+    $r = @$conn->query("SELECT organizer_id FROM events WHERE id = $event_id LIMIT 1");
+    if (!$r || !($row = $r->fetch_assoc())) {
+        return false;
+    }
+    return (int) $row['organizer_id'] === $user_id;
+}
+
 function mm_row_public(array $row): array
 {
     $row['id'] = (int) $row['id'];
@@ -412,9 +424,60 @@ if ($action === 'submit') {
         }
     }
 
-    // Stage via event_pending_edits (single reapproval workflow).
+    $minutesText = $content !== '' ? $content : '(See attached minutes file)';
+    $titlePlain = (string) ($evt['title'] ?? 'Event');
+
+    // Organizer posts go live immediately — no admin reapproval / event pending flip.
+    if (mm_is_organizer($conn, $event_id, $user_id)) {
+        $ins = $conn->prepare(
+            "INSERT INTO meeting_minutes (event_id, content, file_path, status, submitted_by, reviewed_at)
+             VALUES (?, ?, ?, 'approved', ?, NOW())"
+        );
+        if (!$ins) {
+            echo json_encode(['status' => 'error', 'message' => 'Could not save minutes']);
+            exit();
+        }
+        $ins->bind_param('issi', $event_id, $minutesText, $file_path, $user_id);
+        if (!$ins->execute()) {
+            $err = $ins->error;
+            $ins->close();
+            echo json_encode(['status' => 'error', 'message' => 'Could not save minutes: ' . $err]);
+            exit();
+        }
+        $minutesId = (int) $ins->insert_id;
+        $ins->close();
+
+        bg_jobs_enqueue($conn, 'minutes_approved_notify', [
+            'event_id' => $event_id,
+            'minutes_id' => $minutesId,
+            'title' => $titlePlain,
+            'content' => $minutesText,
+            'auto_published' => true,
+        ]);
+
+        mm_debug_log('SUBMIT_AUTO_APPROVED', [
+            'event_id' => $event_id,
+            'user_id' => $user_id,
+            'minutes_id' => $minutesId,
+            'file_path' => $file_path,
+        ]);
+
+        echo json_encode([
+            'status' => 'success',
+            'message' => 'Minutes published',
+            'pending_approval' => false,
+            'auto_published' => true,
+            'minutes_id' => $minutesId,
+            'event_id' => $event_id,
+            'file_path' => $file_path,
+            'file_url' => $file_path ? admin_public_file_url($file_path) : '',
+        ]);
+        exit();
+    }
+
+    // Editor submit: stage via event_pending_edits (admin reapproval).
     $stageOk = event_pending_edits_stage($conn, $event_id, $user_id, [
-        'minutes_content' => $content !== '' ? $content : '(See attached minutes file)',
+        'minutes_content' => $minutesText,
         'minutes_file_path' => $file_path,
     ]);
     if (!$stageOk) {
@@ -478,6 +541,7 @@ if ($action === 'approve' || $action === 'reject') {
             'event_id' => $eventId,
             'minutes_id' => $id,
             'title' => $title,
+            'content' => (string) ($row['content'] ?? ''),
         ]);
     }
 
