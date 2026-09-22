@@ -407,12 +407,19 @@ if ($user_type == 'admin') {
             </li>
             <?php endif; ?>
 
-            <?php if (has_priv('manage_users') || is_main_admin()): ?>
+            <?php if (has_priv('manage_users') || has_priv('institutions') || is_main_admin()): ?>
             <div class="menu-header">User Administration</div>
             <?php if (has_priv('manage_users')): ?>
             <li class="nav-item">
                 <a href="users.php" class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'users.php' ? 'active' : ''; ?>">
                     <i class="fas fa-users-cog"></i> Manage Users
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if (has_priv('institutions')): ?>
+            <li class="nav-item">
+                <a href="institutions.php" class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'institutions.php' ? 'active' : ''; ?>">
+                    <i class="fas fa-university"></i> Institutions
                 </a>
             </li>
             <?php endif; ?>

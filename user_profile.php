@@ -10,8 +10,13 @@ if ((!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) || !isset($_GE
 require_priv('manage_users');
 
 $user_id = intval($_GET['id']);
-// Fetching user details securely
-$user_res = $conn->query("SELECT * FROM users WHERE id = $user_id");
+// Fetching user details securely (with institution name)
+$user_res = $conn->query(
+    "SELECT users.*, institutions.name AS institution_name, institutions.short_code AS institution_short_code
+     FROM users
+     LEFT JOIN institutions ON institutions.id = users.institution_id
+     WHERE users.id = $user_id"
+);
 $user = $user_res->fetch_assoc();
 
 if(!$user) {
@@ -19,6 +24,7 @@ if(!$user) {
 }
 
 $user_full_name = $user['full_name'];
+$institution_name = $user['institution_name'] ?? null;
 
 // 1. Get Events Organized by this User
 $hosted_events = $conn->query("SELECT * FROM events WHERE organizer_id = $user_id ORDER BY event_date DESC");
@@ -127,6 +133,9 @@ $participated_events = $conn->query("
                         <div class="d-flex flex-wrap gap-3 mt-1 opacity-90 small">
                             <span><i class="fas fa-envelope me-1"></i> <?php echo $user['email']; ?></span>
                             <span><i class="fas fa-phone me-1"></i> <?php echo $user['phone']; ?></span>
+                            <?php if (!empty($institution_name)): ?>
+                            <span><i class="fas fa-university me-1"></i> <?php echo htmlspecialchars($institution_name); ?></span>
+                            <?php endif; ?>
                         </div>
                         <div class="mt-3">
                             <span class="badge bg-white text-dark fw-bold text-uppercase px-3 py-2 rounded-pill shadow-sm" style="font-size: 0.65rem;">

@@ -50,5 +50,6 @@ function subadmin_privilege_definitions(): array
         'notification_schedule' => 'Celebration / notification days — cron calendar (add, view & remove)',
         'app_settings' => 'App settings (logo, branding)',
         'ad_posts' => 'Advertisement posts (home screen banners)',
+        'institutions' => 'Institutions (list, add, edit, deactivate)',
     ];
 }

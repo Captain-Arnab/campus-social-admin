@@ -48,7 +48,14 @@ if (isset($_GET['ajax_filter'])) {
     $total_pages = max(1, (int) ceil($total_users / $items_per_page));
     $page = min($page, $total_pages);
     $offset = ($page - 1) * $items_per_page;
-    $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter $filter_sql ORDER BY joined_at DESC, id DESC LIMIT $items_per_page OFFSET $offset");
+    $users = $conn->query(
+        "SELECT users.*, institutions.name AS institution_name
+         FROM users
+         LEFT JOIN institutions ON institutions.id = users.institution_id
+         WHERE 1=1 $user_type_filter $filter_sql
+         ORDER BY users.joined_at DESC, users.id DESC
+         LIMIT $items_per_page OFFSET $offset"
+    );
 
     ob_start();
     if ($users->num_rows > 0) {
@@ -75,6 +82,13 @@ if (isset($_GET['ajax_filter'])) {
                         <span class="mb-1 text-dark"><i class="fas fa-envelope text-muted me-2 small-icon"></i><?php echo $row['email']; ?></span>
                         <span class="text-muted small"><i class="fas fa-phone text-muted me-2 small-icon"></i><?php echo $row['phone']; ?></span>
                     </div>
+                </td>
+                <td>
+                    <?php if (!empty($row['institution_name'])): ?>
+                        <span class="badge badge-pill badge-gray-soft"><i class="fas fa-university me-1"></i><?php echo htmlspecialchars($row['institution_name']); ?></span>
+                    <?php else: ?>
+                        <span class="text-muted small">—</span>
+                    <?php endif; ?>
                 </td>
                 <td>
                     <?php 
@@ -130,7 +144,7 @@ if (isset($_GET['ajax_filter'])) {
             <?php
         }
     } else {
-        echo '<tr><td colspan="7" class="text-center py-5 text-muted fw-light">No users found.</td></tr>';
+        echo '<tr><td colspan="8" class="text-center py-5 text-muted fw-light">No users found.</td></tr>';
     }
     $rows_html = ob_get_clean();
     header('Content-Type: application/json');
@@ -170,7 +184,14 @@ $total_users = (int) $conn->query("SELECT COUNT(*) AS total FROM users WHERE 1=1
 $total_pages = max(1, (int) ceil($total_users / $items_per_page));
 $page = min($page, $total_pages);
 $offset = ($page - 1) * $items_per_page;
-$users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter $filter_sql ORDER BY joined_at DESC, id DESC LIMIT $items_per_page OFFSET $offset");
+$users = $conn->query(
+    "SELECT users.*, institutions.name AS institution_name
+     FROM users
+     LEFT JOIN institutions ON institutions.id = users.institution_id
+     WHERE 1=1 $user_type_filter $filter_sql
+     ORDER BY users.joined_at DESC, users.id DESC
+     LIMIT $items_per_page OFFSET $offset"
+);
 ?>
 
 <!DOCTYPE html>
@@ -349,6 +370,7 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter $filter_s
                         <th class="selection-cell"><input type="checkbox" id="selectAllUsers" aria-label="Select all users on this page"></th>
                         <th>User Profile</th>
                         <th>Contact Info</th>
+                        <th>Institution</th>
                         <th><?php echo ($view == 'students') ? 'Roll Number' : 'Employee ID'; ?></th>
                         <th>Roles & Badges</th>
                         <th>Status</th>
@@ -380,6 +402,13 @@ $users = $conn->query("SELECT * FROM users WHERE 1=1 $user_type_filter $filter_s
                                     <span class="mb-1 text-dark"><i class="fas fa-envelope text-muted me-2 small-icon"></i><?php echo $row['email']; ?></span>
                                     <span class="text-muted small"><i class="fas fa-phone text-muted me-2 small-icon"></i><?php echo $row['phone']; ?></span>
                                 </div>
+                            </td>
+                            <td>
+                                <?php if (!empty($row['institution_name'])): ?>
+                                    <span class="badge badge-pill badge-gray-soft"><i class="fas fa-university me-1"></i><?php echo htmlspecialchars($row['institution_name']); ?></span>
+                                <?php else: ?>
+                                    <span class="text-muted small">—</span>
+                                <?php endif; ?>
                             </td>
                             <td>
                                 <?php 

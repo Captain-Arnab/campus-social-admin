@@ -45,6 +45,35 @@ if ($method == 'POST') {
                 exit();
             }
         }
+
+        // institution_id is required and must reference an active institution
+        $institution_id = isset($data['institution_id']) ? (int) $data['institution_id'] : 0;
+        if ($institution_id <= 0) {
+            echo json_encode([
+                "status" => "error",
+                "field" => "institution_id",
+                "message" => "Please select your institution"
+            ]);
+            exit();
+        }
+        $inst_check = $conn->prepare("SELECT id FROM institutions WHERE id = ? AND status = 'active' LIMIT 1");
+        if (!$inst_check) {
+            echo json_encode(["status" => "error", "message" => "Registration failed: " . $conn->error]);
+            exit();
+        }
+        $inst_check->bind_param('i', $institution_id);
+        $inst_check->execute();
+        $inst_res = $inst_check->get_result();
+        $inst_ok = $inst_res && $inst_res->num_rows > 0;
+        $inst_check->close();
+        if (!$inst_ok) {
+            echo json_encode([
+                "status" => "error",
+                "field" => "institution_id",
+                "message" => "Please select your institution"
+            ]);
+            exit();
+        }
         
         // Validate role-specific fields
         $is_student = (int)$data['is_student'];
@@ -122,8 +151,8 @@ if ($method == 'POST') {
         }
 
         // Insert into users table
-        $sql = "INSERT INTO users (full_name, email, phone, password, bio, interests, profile_pic, status, is_student) 
-                VALUES ('$name', '$email', '$phone', '$pass', '$bio', '$interests', '$profile_pic', 'active', $is_student)";
+        $sql = "INSERT INTO users (full_name, email, phone, password, bio, interests, profile_pic, status, is_student, institution_id) 
+                VALUES ('$name', '$email', '$phone', '$pass', '$bio', '$interests', '$profile_pic', 'active', $is_student, $institution_id)";
         
         if ($conn->query($sql)) {
             $user_id = (int)$conn->insert_id;
