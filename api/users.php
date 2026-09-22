@@ -778,6 +778,54 @@ if ($method == 'GET') {
         $sf_result = $conn->query("SELECT roll_number, emp_number, department_class FROM student_faculty WHERE user_id = $user_id");
         $sf_data = $sf_result ? $sf_result->fetch_assoc() : null;
 
+        $links = [];
+        $linksTbl = @$conn->query("SHOW TABLES LIKE 'user_links'");
+        if ($linksTbl && $linksTbl->num_rows > 0) {
+            $lr = $conn->query("SELECT id, url, label, sort_order FROM user_links WHERE user_id = $user_id ORDER BY sort_order ASC, id ASC");
+            if ($lr) {
+                while ($lrow = $lr->fetch_assoc()) {
+                    $links[] = [
+                        'id' => (int) $lrow['id'],
+                        'url' => $lrow['url'],
+                        'label' => $lrow['label'],
+                        'sort_order' => (int) $lrow['sort_order'],
+                    ];
+                }
+            }
+        }
+
+        // Faculty linked subadmin privileges (for in-app approval UI)
+        $admin_privileges = [];
+        $can_approve_events = false;
+        $linked_subadmin_id = null;
+        $lsCol = @$conn->query("SHOW COLUMNS FROM users LIKE 'linked_subadmin_id'");
+        if ($lsCol && $lsCol->num_rows > 0) {
+            $ls = $conn->query("SELECT linked_subadmin_id FROM users WHERE id = $user_id LIMIT 1");
+            $linked_subadmin_id = $ls && ($lsr = $ls->fetch_assoc()) && $lsr['linked_subadmin_id']
+                ? (int) $lsr['linked_subadmin_id'] : null;
+            if ($linked_subadmin_id) {
+                $sa = $conn->query("SELECT id, status FROM subadmins WHERE id = $linked_subadmin_id LIMIT 1");
+                if ($sa && ($sar = $sa->fetch_assoc()) && ($sar['status'] ?? '') === 'active') {
+                    $pr = $conn->query("SELECT privilege FROM subadmin_privileges WHERE subadmin_id = $linked_subadmin_id");
+                    if ($pr) {
+                        while ($prow = $pr->fetch_assoc()) {
+                            $admin_privileges[] = $prow['privilege'];
+                        }
+                    }
+                    // Match desktop login: empty privilege set means full access
+                    if ($admin_privileges === []) {
+                        require_once __DIR__ . '/../admin_priv.php';
+                        if (function_exists('subadmin_privilege_definitions')) {
+                            $admin_privileges = array_keys(subadmin_privilege_definitions());
+                        }
+                    }
+                    $can_approve_events = in_array('approve_events', $admin_privileges, true);
+                } else {
+                    $linked_subadmin_id = null;
+                }
+            }
+        }
+
         $response = [
             "status" => "success",
             "data" => [
@@ -789,7 +837,11 @@ if ($method == 'GET') {
                 "interests" => $user['interests'],
                 "profile_pic" => $user['profile_pic'],
                 "is_student" => (int)$user['is_student'],
-                "department_class" => $sf_data['department_class'] ?? null
+                "department_class" => $sf_data['department_class'] ?? null,
+                "links" => $links,
+                "linked_subadmin_id" => $linked_subadmin_id,
+                "admin_privileges" => $admin_privileges,
+                "can_approve_events" => $can_approve_events,
             ],
             "stats" => [
                 "created" => $created,

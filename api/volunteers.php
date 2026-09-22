@@ -4,6 +4,7 @@ header('Content-Type: application/json');
 
 try {
     include 'db.php';
+    require_once __DIR__ . '/event_payment_helper.php';
     
     // Only handle POST requests
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -24,11 +25,27 @@ try {
 
     if (($data['action'] ?? '') === 'switch_staff_role') {
         require_once __DIR__ . '/event_staff_switch_lib.php';
+        $event_id = (int) ($data['event_id'] ?? 0);
+        $user_id = (int) ($data['user_id'] ?? 0);
+        if ($event_id > 0 && $user_id > 0 && event_user_has_paid_lock($conn, $event_id, $user_id)) {
+            http_response_code(400);
+            echo json_encode(event_paid_lock_error());
+            exit();
+        }
         event_staff_switch_role($conn, $data);
         exit();
     }
 
     $action = strtolower(trim((string) ($data['action'] ?? ($_GET['action'] ?? ''))));
+
+    if ($action === 'list_committees') {
+        echo json_encode([
+            'status' => 'success',
+            'committees' => volunteer_committees_list($conn),
+        ]);
+        exit();
+    }
+
     if ($action === 'leave' || $action === 'cancel') {
         require_once __DIR__ . '/registration_leave_helper.php';
         $event_id = (int) ($data['event_id'] ?? 0);
@@ -37,6 +54,11 @@ try {
         if (!$v['ok']) {
             http_response_code((int) ($v['http'] ?? 400));
             echo json_encode(["status" => "error", "message" => $v['message']]);
+            exit();
+        }
+        if (event_user_has_paid_lock($conn, $event_id, $user_id)) {
+            http_response_code(400);
+            echo json_encode(event_paid_lock_error());
             exit();
         }
 
@@ -128,9 +150,12 @@ try {
     // Get event organizer's is_student status + registration deadline fields
     require_once __DIR__ . '/../event_date_range_schema.php';
     require_once __DIR__ . '/registration_leave_helper.php';
-    $event_query = "SELECT u.is_student as organizer_is_student, e.event_date";
+    $event_query = "SELECT u.is_student as organizer_is_student, e.event_date, e.status";
     if (schema_events_has_registration_deadline($conn)) {
         $event_query .= ", e.registration_deadline";
+    }
+    if (schema_events_has_fee_modes($conn)) {
+        $event_query .= ", e.participate_mode, e.participate_fee, e.attend_mode, e.attend_fee, e.volunteer_mode";
     }
     $event_query .= " FROM events e 
                     JOIN users u ON e.organizer_id = u.id 
@@ -167,6 +192,20 @@ try {
             "registration_deadline" => events_row_registration_deadline_iso($event_data),
             "server_time" => api_server_time_iso(),
         ]);
+        exit();
+    }
+
+    $modes = event_fee_modes_from_row($event_data);
+    $mf = event_role_mode_fee($modes, 'volunteer');
+    if ($mf['mode'] === 'disabled') {
+        http_response_code(400);
+        echo json_encode(event_join_disabled_message());
+        exit();
+    }
+
+    if (event_user_has_paid_lock($conn, $event_id, $user_id)) {
+        http_response_code(400);
+        echo json_encode(event_paid_lock_error());
         exit();
     }
     
@@ -224,8 +263,13 @@ try {
     }
     
     // Insert new volunteer record
-    $insert_query = "INSERT INTO volunteers (event_id, user_id, role, status) 
-                     VALUES (?, ?, ?, 'active')";
+    if (schema_join_has_payment_status($conn, 'volunteers')) {
+        $insert_query = "INSERT INTO volunteers (event_id, user_id, role, status, payment_status) 
+                         VALUES (?, ?, ?, 'active', 'n/a')";
+    } else {
+        $insert_query = "INSERT INTO volunteers (event_id, user_id, role, status) 
+                         VALUES (?, ?, ?, 'active')";
+    }
     $insert_stmt = $conn->prepare($insert_query);
     
     if (!$insert_stmt) {
@@ -246,6 +290,8 @@ try {
             "volunteer_id" => $new_volunteer_id,
             "from_role" => "none",
             "to_role" => "volunteer",
+            "payment_status" => "n/a",
+            "committees" => volunteer_committees_list($conn),
             "server_time" => api_server_time_iso(),
             "attendee_count" => $counts['attendee_count'],
             "volunteer_count" => $counts['volunteer_count'],

@@ -3,6 +3,7 @@ session_start();
 include 'db.php';
 require_once __DIR__ . '/admin_priv.php';
 require_once __DIR__ . '/event_date_range_schema.php';
+require_once __DIR__ . '/api/event_payment_helper.php';
 
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     header("Location: index.php");
@@ -42,12 +43,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $description = trim($_POST['description'] ?? '');
     $rules = trim($_POST['rules'] ?? '');
 
+    $participate_mode = $_POST['participate_mode'] ?? ($event['participate_mode'] ?? 'without_fee');
+    $attend_mode = $_POST['attend_mode'] ?? ($event['attend_mode'] ?? 'without_fee');
+    $volunteer_mode = $_POST['volunteer_mode'] ?? ($event['volunteer_mode'] ?? 'enabled');
+    $participate_fee = trim((string) ($_POST['participate_fee'] ?? ''));
+    $attend_fee = trim((string) ($_POST['attend_fee'] ?? ''));
+
     if ($title === '') $errors[] = "Title is required";
     if ($category === '') $errors[] = "Category is required";
     if ($venue === '') $errors[] = "Venue is required";
     if ($event_date === '') $errors[] = "Event start date/time is required";
     if (schema_events_has_registration_deadline($conn) && $registration_deadline === '') {
         $errors[] = "Registration Closing Date & Time is required";
+    }
+    if (schema_events_has_fee_modes($conn)) {
+        if (!in_array($participate_mode, ['without_fee', 'with_fee', 'disabled'], true)) {
+            $errors[] = 'Invalid participate mode';
+        }
+        if (!in_array($attend_mode, ['without_fee', 'with_fee', 'disabled'], true)) {
+            $errors[] = 'Invalid attend mode';
+        }
+        if (!in_array($volunteer_mode, ['enabled', 'disabled'], true)) {
+            $errors[] = 'Invalid volunteer mode';
+        }
+        if ($participate_mode === 'with_fee' && (!is_numeric($participate_fee) || (float) $participate_fee <= 0)) {
+            $errors[] = 'Participate fee is required when With Fee is selected';
+        }
+        if ($attend_mode === 'with_fee' && (!is_numeric($attend_fee) || (float) $attend_fee <= 0)) {
+            $errors[] = 'Attend fee is required when With Fee is selected';
+        }
     }
 
     // Basic date validation (expects HTML datetime-local format)
@@ -108,6 +132,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $rd_esc = $conn->real_escape_string($registration_deadline_mysql);
                     @$conn->query("UPDATE events SET registration_deadline = '$rd_esc' WHERE id = $id");
                 }
+            }
+            if (schema_events_has_fee_modes($conn)) {
+                $pm = $conn->real_escape_string($participate_mode);
+                $am = $conn->real_escape_string($attend_mode);
+                $vm = $conn->real_escape_string($volunteer_mode);
+                $pf = ($participate_mode === 'with_fee') ? number_format((float) $participate_fee, 2, '.', '') : 'NULL';
+                $af = ($attend_mode === 'with_fee') ? number_format((float) $attend_fee, 2, '.', '') : 'NULL';
+                @$conn->query(
+                    "UPDATE events SET participate_mode='$pm', participate_fee=" . ($pf === 'NULL' ? 'NULL' : "'$pf'") . ",
+                     attend_mode='$am', attend_fee=" . ($af === 'NULL' ? 'NULL' : "'$af'") . ",
+                     volunteer_mode='$vm' WHERE id = $id"
+                );
             }
             // Clear any pending edit from organizer/editor when admin edits directly
             @$conn->query("DELETE FROM event_pending_edits WHERE event_id = $id");
@@ -263,6 +299,41 @@ $banners = json_decode($event['banners'] ?? '[]');
                             <input type="datetime-local" name="registration_deadline" class="form-control" value="<?php echo htmlspecialchars($_POST['registration_deadline'] ?? $dt_reg_prefill); ?>" <?php echo schema_events_has_registration_deadline($conn) ? 'required' : ''; ?>>
                             <div class="form-text">Join / leave / role switches are blocked after this time.</div>
                         </div>
+                        <?php if (schema_events_has_fee_modes($conn)):
+                            $cur_pm = $_POST['participate_mode'] ?? ($event['participate_mode'] ?? 'without_fee');
+                            $cur_am = $_POST['attend_mode'] ?? ($event['attend_mode'] ?? 'without_fee');
+                            $cur_vm = $_POST['volunteer_mode'] ?? ($event['volunteer_mode'] ?? 'enabled');
+                            $cur_pf = $_POST['participate_fee'] ?? ($event['participate_fee'] ?? '');
+                            $cur_af = $_POST['attend_fee'] ?? ($event['attend_fee'] ?? '');
+                        ?>
+                        <div class="col-12">
+                            <div class="border rounded-3 p-3" style="background:#fafafa;">
+                                <div class="muted-label mb-2">Registration options (fees)</div>
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-bold small">Participate</label>
+                                        <div class="form-check"><input class="form-check-input" type="radio" name="participate_mode" id="pm_free" value="without_fee" <?php echo $cur_pm === 'without_fee' ? 'checked' : ''; ?>><label class="form-check-label" for="pm_free">Without Fee</label></div>
+                                        <div class="form-check"><input class="form-check-input" type="radio" name="participate_mode" id="pm_fee" value="with_fee" <?php echo $cur_pm === 'with_fee' ? 'checked' : ''; ?>><label class="form-check-label" for="pm_fee">With Fee</label></div>
+                                        <div class="form-check mb-2"><input class="form-check-input" type="radio" name="participate_mode" id="pm_off" value="disabled" <?php echo $cur_pm === 'disabled' ? 'checked' : ''; ?>><label class="form-check-label" for="pm_off">Disabled</label></div>
+                                        <input type="number" step="0.01" min="0" name="participate_fee" class="form-control form-control-sm" placeholder="Amount (₹)" value="<?php echo htmlspecialchars((string) $cur_pf); ?>">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-bold small">Attend</label>
+                                        <div class="form-check"><input class="form-check-input" type="radio" name="attend_mode" id="am_free" value="without_fee" <?php echo $cur_am === 'without_fee' ? 'checked' : ''; ?>><label class="form-check-label" for="am_free">Without Fee</label></div>
+                                        <div class="form-check"><input class="form-check-input" type="radio" name="attend_mode" id="am_fee" value="with_fee" <?php echo $cur_am === 'with_fee' ? 'checked' : ''; ?>><label class="form-check-label" for="am_fee">With Fee</label></div>
+                                        <div class="form-check mb-2"><input class="form-check-input" type="radio" name="attend_mode" id="am_off" value="disabled" <?php echo $cur_am === 'disabled' ? 'checked' : ''; ?>><label class="form-check-label" for="am_off">Disabled</label></div>
+                                        <input type="number" step="0.01" min="0" name="attend_fee" class="form-control form-control-sm" placeholder="Amount (₹)" value="<?php echo htmlspecialchars((string) $cur_af); ?>">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-bold small">Volunteer</label>
+                                        <div class="form-check"><input class="form-check-input" type="radio" name="volunteer_mode" id="vm_on" value="enabled" <?php echo $cur_vm === 'enabled' ? 'checked' : ''; ?>><label class="form-check-label" for="vm_on">Enabled</label></div>
+                                        <div class="form-check"><input class="form-check-input" type="radio" name="volunteer_mode" id="vm_off" value="disabled" <?php echo $cur_vm === 'disabled' ? 'checked' : ''; ?>><label class="form-check-label" for="vm_off">Disabled</label></div>
+                                        <div class="form-text mt-2">No fee option for volunteers.</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <?php endif; ?>
                         <div class="col-12">
                             <label class="form-label fw-bold small">Description</label>
                             <textarea name="description" class="form-control" rows="5"><?php echo htmlspecialchars($_POST['description'] ?? $event['description']); ?></textarea>

@@ -1,11 +1,12 @@
 <?php
-// attend.php - Join or leave as attendee (open to both students and faculty)
+// attend.php - Join / leave / paid confirm_intent + verify_payment as attendee
 header('Content-Type: application/json');
 
 try {
     include 'db.php';
     require_once __DIR__ . '/../event_date_range_schema.php';
     require_once __DIR__ . '/registration_leave_helper.php';
+    require_once __DIR__ . '/event_payment_helper.php';
 
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         http_response_code(405);
@@ -22,7 +23,92 @@ try {
     }
 
     $action = strtolower(trim((string) ($data['action'] ?? ($_GET['action'] ?? 'join'))));
-    // Default (no action / join) keeps backward-compatible join behavior.
+
+    if ($action === 'confirm_intent') {
+        $event_id = (int) ($data['event_id'] ?? 0);
+        $user_id = (int) ($data['user_id'] ?? 0);
+        if ($event_id <= 0 || $user_id <= 0) {
+            http_response_code(400);
+            echo json_encode(["status" => "error", "message" => "event_id and user_id are required"]);
+            exit();
+        }
+        $evCols = 'id, event_date, status';
+        if (schema_events_has_registration_deadline($conn)) {
+            $evCols .= ', registration_deadline';
+        }
+        if (schema_events_has_fee_modes($conn)) {
+            $evCols .= ', attend_mode, attend_fee, participate_mode, participate_fee, volunteer_mode';
+        }
+        $er = $conn->query("SELECT $evCols FROM events WHERE id = $event_id LIMIT 1");
+        $event_row = $er ? $er->fetch_assoc() : null;
+        if (!$event_row) {
+            http_response_code(404);
+            echo json_encode(["status" => "error", "message" => "Event not found"]);
+            exit();
+        }
+        if (events_row_registration_closed($event_row)) {
+            http_response_code(400);
+            echo json_encode([
+                "status" => "error",
+                "message" => "Registration closed for this event",
+                "registration_closed" => true,
+            ]);
+            exit();
+        }
+        $res = event_payment_confirm_intent($conn, $event_id, $user_id, 'attendee', []);
+        if (($res['status'] ?? '') !== 'success') {
+            http_response_code((int) ($res['http'] ?? 400));
+        }
+        echo json_encode($res);
+        exit();
+    }
+
+    if ($action === 'verify_payment') {
+        require_once __DIR__ . '/event_staff_switch_lib.php';
+        $res = event_payment_verify($conn, array_merge($data, ['role' => 'attendee']), function (array $paymentRow, array $meta) use ($conn) {
+            $event_id = (int) $paymentRow['event_id'];
+            $user_id = (int) $paymentRow['user_id'];
+
+            // Clear other roles then insert attendee as paid
+            @$conn->query("DELETE FROM volunteers WHERE user_id = $user_id AND event_id = $event_id");
+            @$conn->query("DELETE FROM participant WHERE user_id = $user_id AND event_id = $event_id");
+            $exists = $conn->query("SELECT id FROM attendees WHERE user_id = $user_id AND event_id = $event_id LIMIT 1");
+            if ($exists && $exists->num_rows > 0) {
+                if (schema_join_has_payment_status($conn, 'attendees')) {
+                    @$conn->query("UPDATE attendees SET payment_status = 'paid' WHERE user_id = $user_id AND event_id = $event_id");
+                }
+            } else {
+                if (schema_join_has_payment_status($conn, 'attendees')) {
+                    $ins = $conn->prepare("INSERT INTO attendees (event_id, user_id, joined_at, payment_status) VALUES (?, ?, NOW(), 'paid')");
+                    $ins->bind_param('ii', $event_id, $user_id);
+                } else {
+                    $ins = $conn->prepare("INSERT INTO attendees (event_id, user_id, joined_at) VALUES (?, ?, NOW())");
+                    $ins->bind_param('ii', $event_id, $user_id);
+                }
+                if (!$ins || !$ins->execute()) {
+                    return ['status' => 'error', 'message' => 'Payment confirmed but registration failed'];
+                }
+                $ins->close();
+            }
+            $counts = registration_event_counts($conn, $event_id);
+            return [
+                'status' => 'success',
+                'message' => 'Payment verified. You are registered as an attendee',
+                'to_role' => 'attendee',
+                'payment_status' => 'paid',
+                'server_time' => api_server_time_iso(),
+                'attendee_count' => $counts['attendee_count'],
+                'volunteer_count' => $counts['volunteer_count'],
+                'participant_count' => $counts['participant_count'],
+                'viewer_count' => $counts['viewer_count'],
+            ];
+        });
+        if (($res['status'] ?? '') !== 'success') {
+            http_response_code(400);
+        }
+        echo json_encode($res);
+        exit();
+    }
 
     // ——— leave ———
     if ($action === 'leave' || $action === 'cancel') {
@@ -32,6 +118,11 @@ try {
         if (!$v['ok']) {
             http_response_code((int) ($v['http'] ?? 400));
             echo json_encode(["status" => "error", "message" => $v['message']]);
+            exit();
+        }
+        if (event_user_has_paid_lock($conn, $event_id, $user_id)) {
+            http_response_code(400);
+            echo json_encode(event_paid_lock_error());
             exit();
         }
 
@@ -56,15 +147,7 @@ try {
         }
         $del->close();
 
-        registration_log_action(
-            $conn,
-            $event_id,
-            $user_id,
-            'attending',
-            'left',
-            'User left as attendee'
-        );
-
+        registration_log_action($conn, $event_id, $user_id, 'attending', 'left', 'User left as attendee');
         $counts = registration_event_counts($conn, $event_id);
         echo json_encode([
             "status" => "success",
@@ -105,12 +188,9 @@ try {
         echo json_encode(["status" => "error", "message" => "Database error: " . $conn->error]);
         exit();
     }
-
     $user_check->bind_param("i", $user_id);
     $user_check->execute();
-    $user_result = $user_check->get_result();
-
-    if ($user_result->num_rows == 0) {
+    if ($user_check->get_result()->num_rows == 0) {
         http_response_code(404);
         echo json_encode(["status" => "error", "message" => "User not found"]);
         $user_check->close();
@@ -118,9 +198,12 @@ try {
     }
     $user_check->close();
 
-    $evCols = 'id, event_date';
+    $evCols = 'id, event_date, status';
     if (schema_events_has_registration_deadline($conn)) {
         $evCols .= ', registration_deadline';
+    }
+    if (schema_events_has_fee_modes($conn)) {
+        $evCols .= ', attend_mode, attend_fee, participate_mode, participate_fee, volunteer_mode';
     }
     $event_check = $conn->prepare("SELECT $evCols FROM events WHERE id = ?");
     if (!$event_check) {
@@ -128,11 +211,9 @@ try {
         echo json_encode(["status" => "error", "message" => "Database error: " . $conn->error]);
         exit();
     }
-
     $event_check->bind_param("i", $event_id);
     $event_check->execute();
     $event_result = $event_check->get_result();
-
     if ($event_result->num_rows == 0) {
         http_response_code(404);
         echo json_encode(["status" => "error", "message" => "Event not found"]);
@@ -154,7 +235,32 @@ try {
         exit();
     }
 
-    // Already attending, or registered as volunteer/participant → switch/update in place.
+    $modes = event_fee_modes_from_row($event_row);
+    $mf = event_role_mode_fee($modes, 'attendee');
+    if ($mf['mode'] === 'disabled') {
+        http_response_code(400);
+        echo json_encode(event_join_disabled_message());
+        exit();
+    }
+    if ($mf['mode'] === 'with_fee') {
+        http_response_code(402);
+        echo json_encode([
+            "status" => "error",
+            "message" => "Payment required. Call action=confirm_intent then complete payment (mock Simulate Payment or live checkout).",
+            "payment_required" => true,
+            "fee" => $mf['fee'],
+            "role" => "attendee",
+            "mock_gateway" => payment_gateway_is_mock(),
+        ]);
+        exit();
+    }
+
+    if (event_user_has_paid_lock($conn, $event_id, $user_id)) {
+        http_response_code(400);
+        echo json_encode(event_paid_lock_error());
+        exit();
+    }
+
     require_once __DIR__ . '/event_staff_switch_lib.php';
     $vol_chk = $conn->prepare("SELECT id FROM volunteers WHERE user_id = ? AND event_id = ? AND status = 'active' LIMIT 1");
     $vol_chk->bind_param('ii', $user_id, $event_id);
@@ -186,16 +292,16 @@ try {
         exit();
     }
 
-    $insert_query = "INSERT INTO attendees (event_id, user_id, joined_at)
-                     VALUES (?, ?, NOW())";
-    $insert_stmt = $conn->prepare($insert_query);
-
+    if (schema_join_has_payment_status($conn, 'attendees')) {
+        $insert_stmt = $conn->prepare("INSERT INTO attendees (event_id, user_id, joined_at, payment_status) VALUES (?, ?, NOW(), 'n/a')");
+    } else {
+        $insert_stmt = $conn->prepare("INSERT INTO attendees (event_id, user_id, joined_at) VALUES (?, ?, NOW())");
+    }
     if (!$insert_stmt) {
         http_response_code(500);
         echo json_encode(["status" => "error", "message" => "Database error: " . $conn->error]);
         exit();
     }
-
     $insert_stmt->bind_param("ii", $event_id, $user_id);
 
     if ($insert_stmt->execute()) {
@@ -207,6 +313,7 @@ try {
             "attendee_id" => $insert_stmt->insert_id,
             "from_role" => "none",
             "to_role" => "attendee",
+            "payment_status" => "n/a",
             "server_time" => api_server_time_iso(),
             "attendee_count" => $counts['attendee_count'],
             "volunteer_count" => $counts['volunteer_count'],
@@ -217,7 +324,6 @@ try {
         http_response_code(500);
         echo json_encode(["status" => "error", "message" => "Failed to register: " . $insert_stmt->error]);
     }
-
     $insert_stmt->close();
 
 } catch (Exception $e) {

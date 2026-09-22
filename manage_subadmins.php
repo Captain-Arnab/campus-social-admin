@@ -152,6 +152,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $err = 'Update failed.';
             }
         }
+    } elseif ($action === 'link_faculty') {
+        $sid = (int) ($_POST['subadmin_id'] ?? 0);
+        $faculty_user_id = (int) ($_POST['faculty_user_id'] ?? 0);
+        $col = @$conn->query("SHOW COLUMNS FROM users LIKE 'linked_subadmin_id'");
+        if (!$col || $col->num_rows === 0) {
+            $err = 'Run migration 006_faculty_linked_subadmin.sql first.';
+        } elseif ($sid <= 0) {
+            $err = 'Invalid sub-admin.';
+        } else {
+            // Clear previous links to this subadmin
+            @$conn->query("UPDATE users SET linked_subadmin_id = NULL WHERE linked_subadmin_id = $sid");
+            if ($faculty_user_id > 0) {
+                $fu = $conn->query("SELECT id, is_student FROM users WHERE id = $faculty_user_id LIMIT 1");
+                if (!$fu || !($frow = $fu->fetch_assoc())) {
+                    $err = 'Faculty user not found.';
+                } elseif ((int) $frow['is_student'] === 1) {
+                    $err = 'Link a faculty account (is_student = 0), not a student.';
+                } else {
+                    // Clear if this user was linked elsewhere
+                    @$conn->query("UPDATE users SET linked_subadmin_id = NULL WHERE id = $faculty_user_id");
+                    $ok = @$conn->query("UPDATE users SET linked_subadmin_id = $sid WHERE id = $faculty_user_id");
+                    if ($ok) {
+                        subadmin_flash_redirect('Faculty user linked for in-app approval.');
+                    }
+                    $err = 'Could not link faculty user.';
+                }
+            } else {
+                subadmin_flash_redirect('Faculty link cleared.');
+            }
+        }
     } elseif ($action === 'toggle_status') {
         $sid = (int) ($_POST['subadmin_id'] ?? 0);
         if ($sid > 0) {
@@ -181,6 +211,26 @@ if ($pr_all) {
             $priv_by_subadmin[$sid] = [];
         }
         $priv_by_subadmin[$sid][] = $r['privilege'];
+    }
+}
+$linked_user_by_subadmin = [];
+$lsCol = @$conn->query("SHOW COLUMNS FROM users LIKE 'linked_subadmin_id'");
+if ($lsCol && $lsCol->num_rows > 0) {
+    $lu = $conn->query("SELECT id, full_name, linked_subadmin_id FROM users WHERE linked_subadmin_id IS NOT NULL");
+    if ($lu) {
+        while ($r = $lu->fetch_assoc()) {
+            $linked_user_by_subadmin[(int) $r['linked_subadmin_id']] = [
+                'id' => (int) $r['id'],
+                'full_name' => $r['full_name'],
+            ];
+        }
+    }
+}
+$faculty_options = [];
+$fo = $conn->query("SELECT id, full_name, email FROM users WHERE is_student = 0 AND status = 'active' ORDER BY full_name ASC LIMIT 500");
+if ($fo) {
+    while ($f = $fo->fetch_assoc()) {
+        $faculty_options[] = $f;
     }
 }
 $edit_id = isset($_GET['edit']) ? (int) $_GET['edit'] : 0;
@@ -259,12 +309,13 @@ if ($edit_id > 0) {
     <div class="card border-0 shadow-sm rounded-4">
         <div class="card-body p-0 subadmins-table-wrap">
             <table class="table table-hover mb-0 align-middle">
-                <thead class="table-light"><tr><th>ID</th><th>Username</th><th>Name</th><th>Status</th><th>Actions</th></tr></thead>
+                <thead class="table-light"><tr><th>ID</th><th>Username</th><th>Name</th><th>Linked faculty (app)</th><th>Status</th><th>Actions</th></tr></thead>
                 <tbody>
                 <?php if ($list): while ($row = $list->fetch_assoc()): ?>
                     <?php
                     $sid = (int) $row['id'];
                     $row_privs = $priv_by_subadmin[$sid] ?? [];
+                    $linked = $linked_user_by_subadmin[$sid] ?? null;
                     $edit_payload = [
                         'id' => $sid,
                         'username' => $row['username'],
@@ -277,6 +328,24 @@ if ($edit_id > 0) {
                         <td><?php echo $sid; ?></td>
                         <td><?php echo htmlspecialchars($row['username']); ?></td>
                         <td><?php echo htmlspecialchars($row['full_name']); ?></td>
+                        <td>
+                            <form method="post" class="d-flex flex-wrap gap-1 align-items-center">
+                                <input type="hidden" name="action" value="link_faculty">
+                                <input type="hidden" name="subadmin_id" value="<?php echo $sid; ?>">
+                                <select name="faculty_user_id" class="form-select form-select-sm" style="min-width:180px;max-width:240px;">
+                                    <option value="0">— none —</option>
+                                    <?php foreach ($faculty_options as $f): ?>
+                                        <option value="<?php echo (int) $f['id']; ?>" <?php echo ($linked && $linked['id'] === (int) $f['id']) ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($f['full_name'] . ' (#' . $f['id'] . ')'); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <button type="submit" class="btn btn-sm btn-outline-dark rounded-3">Save link</button>
+                            </form>
+                            <?php if ($linked): ?>
+                                <div class="small text-muted mt-1">App user #<?php echo (int) $linked['id']; ?>: <?php echo htmlspecialchars($linked['full_name']); ?></div>
+                            <?php endif; ?>
+                        </td>
                         <td><span class="badge bg-<?php echo $row['status'] === 'active' ? 'success' : 'secondary'; ?>"><?php echo htmlspecialchars($row['status']); ?></span></td>
                         <td class="d-flex flex-wrap gap-2">
                             <button type="button" class="btn btn-sm btn-outline-primary rounded-3 js-open-edit-subadmin" data-payload="<?php echo htmlspecialchars(json_encode($edit_payload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES, 'UTF-8'); ?>">Edit</button>

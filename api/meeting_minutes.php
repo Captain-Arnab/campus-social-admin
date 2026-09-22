@@ -358,6 +358,14 @@ if ($action === 'submit') {
     $content = trim((string) (
         $data['content'] ?? $data['minutes'] ?? $_POST['content'] ?? $_POST['minutes'] ?? ''
     ));
+    $promotional_link = trim((string) ($data['promotional_link'] ?? $_POST['promotional_link'] ?? ''));
+    $live_stream_link = trim((string) ($data['live_stream_link'] ?? $_POST['live_stream_link'] ?? ''));
+    if ($promotional_link === '') {
+        $promotional_link = null;
+    }
+    if ($live_stream_link === '') {
+        $live_stream_link = null;
+    }
 
     // Attachment may arrive as attachment, picture, file, or minutes_file
     $fileKey = null;
@@ -429,15 +437,30 @@ if ($action === 'submit') {
 
     // Organizer posts go live immediately — no admin reapproval / event pending flip.
     if (mm_is_organizer($conn, $event_id, $user_id)) {
-        $ins = $conn->prepare(
-            "INSERT INTO meeting_minutes (event_id, content, file_path, status, submitted_by, reviewed_at)
-             VALUES (?, ?, ?, 'approved', ?, NOW())"
-        );
-        if (!$ins) {
-            echo json_encode(['status' => 'error', 'message' => 'Could not save minutes']);
-            exit();
+        $hasLinks = false;
+        $lc = @$conn->query("SHOW COLUMNS FROM meeting_minutes LIKE 'promotional_link'");
+        $hasLinks = $lc && $lc->num_rows > 0;
+        if ($hasLinks) {
+            $ins = $conn->prepare(
+                "INSERT INTO meeting_minutes (event_id, content, file_path, promotional_link, live_stream_link, status, submitted_by, reviewed_at)
+                 VALUES (?, ?, ?, ?, ?, 'approved', ?, NOW())"
+            );
+            if (!$ins) {
+                echo json_encode(['status' => 'error', 'message' => 'Could not save minutes']);
+                exit();
+            }
+            $ins->bind_param('issssi', $event_id, $minutesText, $file_path, $promotional_link, $live_stream_link, $user_id);
+        } else {
+            $ins = $conn->prepare(
+                "INSERT INTO meeting_minutes (event_id, content, file_path, status, submitted_by, reviewed_at)
+                 VALUES (?, ?, ?, 'approved', ?, NOW())"
+            );
+            if (!$ins) {
+                echo json_encode(['status' => 'error', 'message' => 'Could not save minutes']);
+                exit();
+            }
+            $ins->bind_param('issi', $event_id, $minutesText, $file_path, $user_id);
         }
-        $ins->bind_param('issi', $event_id, $minutesText, $file_path, $user_id);
         if (!$ins->execute()) {
             $err = $ins->error;
             $ins->close();
@@ -471,6 +494,8 @@ if ($action === 'submit') {
             'event_id' => $event_id,
             'file_path' => $file_path,
             'file_url' => $file_path ? admin_public_file_url($file_path) : '',
+            'promotional_link' => $promotional_link,
+            'live_stream_link' => $live_stream_link,
         ]);
         exit();
     }
@@ -480,6 +505,17 @@ if ($action === 'submit') {
         'minutes_content' => $minutesText,
         'minutes_file_path' => $file_path,
     ]);
+    if ($stageOk) {
+        // Persist link fields (separate update keeps stage() bind signature stable)
+        $pl = $promotional_link !== null ? "'" . $conn->real_escape_string($promotional_link) . "'" : 'NULL';
+        $ll = $live_stream_link !== null ? "'" . $conn->real_escape_string($live_stream_link) . "'" : 'NULL';
+        $hasPl = @$conn->query("SHOW COLUMNS FROM event_pending_edits LIKE 'promotional_link'");
+        if ($hasPl && $hasPl->num_rows > 0) {
+            @$conn->query(
+                "UPDATE event_pending_edits SET promotional_link = $pl, live_stream_link = $ll WHERE event_id = $event_id"
+            );
+        }
+    }
     if (!$stageOk) {
         echo json_encode(['status' => 'error', 'message' => 'Could not stage minutes for approval']);
         exit();

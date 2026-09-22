@@ -15,6 +15,7 @@
 
 require_once __DIR__ . '/../event_date_range_schema.php';
 require_once __DIR__ . '/registration_leave_helper.php';
+require_once __DIR__ . '/event_payment_helper.php';
 
 /**
  * @param array<string,mixed> $data
@@ -56,6 +57,10 @@ function event_staff_switch_role(mysqli $conn, array $data, bool $echoJson = tru
             'status' => 'error',
             'message' => 'to_role must be attend/attendee, volunteer, or participant',
         ]);
+    }
+
+    if (event_user_has_paid_lock($conn, $event_id, $user_id)) {
+        return $respond(400, event_paid_lock_error());
     }
 
     $user_stmt = $conn->prepare('SELECT id, is_student, status FROM users WHERE id = ? LIMIT 1');

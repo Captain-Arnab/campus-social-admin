@@ -16,7 +16,9 @@ function schema_event_pending_edits_ensure_extras($conn): void
     $cols = [
         'minutes_content' => "ALTER TABLE `event_pending_edits` ADD COLUMN `minutes_content` text NULL AFTER `rules`",
         'minutes_file_path' => "ALTER TABLE `event_pending_edits` ADD COLUMN `minutes_file_path` varchar(255) NULL AFTER `minutes_content`",
-        'editors_json' => "ALTER TABLE `event_pending_edits` ADD COLUMN `editors_json` text NULL AFTER `minutes_file_path`",
+        'promotional_link' => "ALTER TABLE `event_pending_edits` ADD COLUMN `promotional_link` varchar(500) NULL AFTER `minutes_file_path`",
+        'live_stream_link' => "ALTER TABLE `event_pending_edits` ADD COLUMN `live_stream_link` varchar(500) NULL AFTER `promotional_link`",
+        'editors_json' => "ALTER TABLE `event_pending_edits` ADD COLUMN `editors_json` text NULL AFTER `live_stream_link`",
         'meeting_update_message' => "ALTER TABLE `event_pending_edits` ADD COLUMN `meeting_update_message` text NULL AFTER `editors_json`",
         'meeting_update_recipient_type' => "ALTER TABLE `event_pending_edits` ADD COLUMN `meeting_update_recipient_type` varchar(32) NULL AFTER `meeting_update_message`",
     ];

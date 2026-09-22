@@ -96,15 +96,35 @@ if ($action === 'approve') {
             }
             $submittedBy = (int) ($pending['submitted_by_user_id'] ?? 0);
             $fp = $minutesFile !== '' ? $minutesFile : null;
-            $ins = $conn->prepare(
-                "INSERT INTO meeting_minutes (event_id, content, file_path, status, submitted_by, reviewed_at)
-                 VALUES (?, ?, ?, 'approved', ?, NOW())"
-            );
-            if ($ins) {
-                $ins->bind_param('issi', $id, $minutesContent, $fp, $submittedBy);
-                $ins->execute();
-                $minutesId = (int) $ins->insert_id;
-                $ins->close();
+            $promo = trim((string) ($pending['promotional_link'] ?? ''));
+            $live = trim((string) ($pending['live_stream_link'] ?? ''));
+            $promo = $promo !== '' ? $promo : null;
+            $live = $live !== '' ? $live : null;
+            $hasLinks = false;
+            $lc = @$conn->query("SHOW COLUMNS FROM meeting_minutes LIKE 'promotional_link'");
+            $hasLinks = $lc && $lc->num_rows > 0;
+            if ($hasLinks) {
+                $ins = $conn->prepare(
+                    "INSERT INTO meeting_minutes (event_id, content, file_path, promotional_link, live_stream_link, status, submitted_by, reviewed_at)
+                     VALUES (?, ?, ?, ?, ?, 'approved', ?, NOW())"
+                );
+                if ($ins) {
+                    $ins->bind_param('issssi', $id, $minutesContent, $fp, $promo, $live, $submittedBy);
+                    $ins->execute();
+                    $minutesId = (int) $ins->insert_id;
+                    $ins->close();
+                }
+            } else {
+                $ins = $conn->prepare(
+                    "INSERT INTO meeting_minutes (event_id, content, file_path, status, submitted_by, reviewed_at)
+                     VALUES (?, ?, ?, 'approved', ?, NOW())"
+                );
+                if ($ins) {
+                    $ins->bind_param('issi', $id, $minutesContent, $fp, $submittedBy);
+                    $ins->execute();
+                    $minutesId = (int) $ins->insert_id;
+                    $ins->close();
+                }
             }
         }
 

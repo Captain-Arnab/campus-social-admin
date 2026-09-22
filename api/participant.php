@@ -4,6 +4,7 @@ header('Content-Type: application/json');
 
 try {
     include 'db.php';
+    require_once __DIR__ . '/event_payment_helper.php';
     
     // Only handle POST requests
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -24,11 +25,94 @@ try {
 
     if (($data['action'] ?? '') === 'switch_staff_role') {
         require_once __DIR__ . '/event_staff_switch_lib.php';
+        require_once __DIR__ . '/event_payment_helper.php';
+        $event_id = (int) ($data['event_id'] ?? 0);
+        $user_id = (int) ($data['user_id'] ?? 0);
+        if ($event_id > 0 && $user_id > 0 && event_user_has_paid_lock($conn, $event_id, $user_id)) {
+            http_response_code(400);
+            echo json_encode(event_paid_lock_error());
+            exit();
+        }
         event_staff_switch_role($conn, $data);
         exit();
     }
 
     $action = strtolower(trim((string) ($data['action'] ?? ($_GET['action'] ?? ''))));
+
+    if ($action === 'confirm_intent') {
+        require_once __DIR__ . '/../event_date_range_schema.php';
+        require_once __DIR__ . '/registration_leave_helper.php';
+        $event_id = (int) ($data['event_id'] ?? 0);
+        $user_id = (int) ($data['user_id'] ?? 0);
+        $department_class = trim((string) ($data['department_class'] ?? ''));
+        if ($event_id <= 0 || $user_id <= 0) {
+            http_response_code(400);
+            echo json_encode(["status" => "error", "message" => "event_id and user_id are required"]);
+            exit();
+        }
+        $res = event_payment_confirm_intent($conn, $event_id, $user_id, 'participant', [
+            'department_class' => $department_class,
+        ]);
+        if (($res['status'] ?? '') !== 'success') {
+            http_response_code((int) ($res['http'] ?? 400));
+        }
+        echo json_encode($res);
+        exit();
+    }
+
+    if ($action === 'verify_payment') {
+        require_once __DIR__ . '/registration_leave_helper.php';
+        $deptFromBody = trim((string) ($data['department_class'] ?? ''));
+        $res = event_payment_verify($conn, array_merge($data, ['role' => 'participant']), function (array $paymentRow, array $meta) use ($conn, $deptFromBody) {
+            $event_id = (int) $paymentRow['event_id'];
+            $user_id = (int) $paymentRow['user_id'];
+            $department_class = $deptFromBody !== '' ? $deptFromBody : trim((string) ($meta['department_class'] ?? ''));
+            if ($department_class === '') {
+                return ['status' => 'error', 'message' => 'department_class is required'];
+            }
+            @$conn->query("DELETE FROM volunteers WHERE user_id = $user_id AND event_id = $event_id");
+            @$conn->query("DELETE FROM attendees WHERE user_id = $user_id AND event_id = $event_id");
+            $dept_esc = $conn->real_escape_string($department_class);
+            $conn->query("UPDATE student_faculty SET department_class = '$dept_esc' WHERE user_id = $user_id");
+            $exists = $conn->query("SELECT id FROM participant WHERE user_id = $user_id AND event_id = $event_id LIMIT 1");
+            if ($exists && $exists->num_rows > 0) {
+                if (schema_join_has_payment_status($conn, 'participant')) {
+                    @$conn->query("UPDATE participant SET status='active', department_class='$dept_esc', payment_status='paid' WHERE user_id=$user_id AND event_id=$event_id");
+                } else {
+                    @$conn->query("UPDATE participant SET status='active', department_class='$dept_esc' WHERE user_id=$user_id AND event_id=$event_id");
+                }
+            } else {
+                if (schema_join_has_payment_status($conn, 'participant')) {
+                    $ins = $conn->prepare("INSERT INTO participant (event_id, user_id, status, department_class, payment_status) VALUES (?, ?, 'active', ?, 'paid')");
+                } else {
+                    $ins = $conn->prepare("INSERT INTO participant (event_id, user_id, status, department_class) VALUES (?, ?, 'active', ?)");
+                }
+                $ins->bind_param('iis', $event_id, $user_id, $department_class);
+                if (!$ins->execute()) {
+                    return ['status' => 'error', 'message' => 'Payment confirmed but registration failed'];
+                }
+                $ins->close();
+            }
+            $counts = registration_event_counts($conn, $event_id);
+            return [
+                'status' => 'success',
+                'message' => 'Payment verified. You are registered as a participant',
+                'to_role' => 'participant',
+                'payment_status' => 'paid',
+                'server_time' => api_server_time_iso(),
+                'attendee_count' => $counts['attendee_count'],
+                'volunteer_count' => $counts['volunteer_count'],
+                'participant_count' => $counts['participant_count'],
+                'viewer_count' => $counts['viewer_count'],
+            ];
+        });
+        if (($res['status'] ?? '') !== 'success') {
+            http_response_code(400);
+        }
+        echo json_encode($res);
+        exit();
+    }
+
     if ($action === 'leave' || $action === 'cancel') {
         require_once __DIR__ . '/registration_leave_helper.php';
         $event_id = (int) ($data['event_id'] ?? 0);
@@ -37,6 +121,11 @@ try {
         if (!$v['ok']) {
             http_response_code((int) ($v['http'] ?? 400));
             echo json_encode(["status" => "error", "message" => $v['message']]);
+            exit();
+        }
+        if (event_user_has_paid_lock($conn, $event_id, $user_id)) {
+            http_response_code(400);
+            echo json_encode(event_paid_lock_error());
             exit();
         }
 
@@ -137,9 +226,12 @@ try {
     // Get event organizer's is_student status + registration deadline fields
     require_once __DIR__ . '/../event_date_range_schema.php';
     require_once __DIR__ . '/registration_leave_helper.php';
-    $event_query = "SELECT u.is_student as organizer_is_student, e.event_date";
+    $event_query = "SELECT u.is_student as organizer_is_student, e.event_date, e.status";
     if (schema_events_has_registration_deadline($conn)) {
         $event_query .= ", e.registration_deadline";
+    }
+    if (schema_events_has_fee_modes($conn)) {
+        $event_query .= ", e.participate_mode, e.participate_fee, e.attend_mode, e.attend_fee, e.volunteer_mode";
     }
     $event_query .= " FROM events e 
                     JOIN users u ON e.organizer_id = u.id 
@@ -176,6 +268,33 @@ try {
             "registration_deadline" => events_row_registration_deadline_iso($event_data),
             "server_time" => api_server_time_iso(),
         ]);
+        exit();
+    }
+
+    // Fee / availability modes for participate
+    $modes = event_fee_modes_from_row($event_data);
+    $mf = event_role_mode_fee($modes, 'participant');
+    if ($mf['mode'] === 'disabled') {
+        http_response_code(400);
+        echo json_encode(event_join_disabled_message());
+        exit();
+    }
+    if ($mf['mode'] === 'with_fee') {
+        http_response_code(402);
+        echo json_encode([
+            "status" => "error",
+            "message" => "Payment required. Call action=confirm_intent then complete payment (mock Simulate Payment or live checkout).",
+            "payment_required" => true,
+            "fee" => $mf['fee'],
+            "role" => "participant",
+            "mock_gateway" => payment_gateway_is_mock(),
+        ]);
+        exit();
+    }
+
+    if (event_user_has_paid_lock($conn, $event_id, $user_id)) {
+        http_response_code(400);
+        echo json_encode(event_paid_lock_error());
         exit();
     }
     
@@ -236,8 +355,13 @@ try {
     $conn->query("UPDATE student_faculty SET department_class = '$dept_esc' WHERE user_id = $user_id");
 
     // Insert new participant record (stores dept at registration time)
-    $insert_query = "INSERT INTO participant (event_id, user_id, status, department_class) 
-                     VALUES (?, ?, 'active', ?)";
+    if (schema_join_has_payment_status($conn, 'participant')) {
+        $insert_query = "INSERT INTO participant (event_id, user_id, status, department_class, payment_status) 
+                         VALUES (?, ?, 'active', ?, 'n/a')";
+    } else {
+        $insert_query = "INSERT INTO participant (event_id, user_id, status, department_class) 
+                         VALUES (?, ?, 'active', ?)";
+    }
     $insert_stmt = $conn->prepare($insert_query);
 
     if (!$insert_stmt) {

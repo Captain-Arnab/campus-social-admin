@@ -1,0 +1,19 @@
+<?php
+/**
+ * Example payment gateway config — copy to razorpay_config.local.php (gitignored).
+ *
+ * Until merchant credentials arrive, leave keys empty (or set force_mock => true).
+ * The API uses the MOCK gateway: confirm_intent returns MOCK_ORDER_* + mock_gateway:true;
+ * verify_payment accepts { order_id, simulate: "success"|"failure" }.
+ *
+ * When ready for live Razorpay:
+ * return [
+ *   'key_id'     => 'rzp_live_xxxxxxxx',
+ *   'key_secret' => 'your_secret',
+ *   'currency'   => 'INR',
+ *   'force_mock' => false,
+ * ];
+ */
+return [
+    'force_mock' => true,
+];
