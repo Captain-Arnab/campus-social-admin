@@ -427,6 +427,13 @@ if ($method == 'GET') {
             if ($pe_res && $pe_res->num_rows > 0) {
                 $row['pending_edit'] = $pe_res->fetch_assoc();
             }
+
+            // Caller's own registration (for Leave/Switch gating after cold start)
+            $row['my_registration'] = null;
+            if ($user_id > 0) {
+                require_once __DIR__ . '/event_payment_helper.php';
+                $row['my_registration'] = event_user_my_registration($conn, (int) $event_id, $user_id);
+            }
         }
         events_api_enrich_event_row($row);
         $data[] = $row;

@@ -288,6 +288,32 @@ function campus_inbox_after_admin_approve_or_reject(
 }
 
 /**
+ * Cron hard-deleted a pending event past its registration deadline — notify organizer
+ * (inbox + push), same delivery path as reject. Call after a successful delete; pass
+ * organizer_id/title captured before the row was removed.
+ */
+function campus_inbox_after_expired_pending(
+    $conn,
+    int $event_id,
+    int $organizer_id,
+    string $event_title_plain
+): void {
+    if ($organizer_id <= 0 || $event_id <= 0) {
+        return;
+    }
+
+    $type  = 'event_expired_pending';
+    $title = 'Event removed';
+    $body  = 'Your event "' . $event_title_plain . '" was automatically removed because it remained pending past the registration deadline.';
+
+    campus_inbox_deliver_to_organizer($conn, $organizer_id, $event_id, $type, $title, $body, [
+        'reason'     => 'expired_pending',
+        'new_status' => 'expired_pending',
+        'old_status' => 'pending',
+    ]);
+}
+
+/**
  * Admin put the event on hold — notify organizer.
  */
 function campus_inbox_after_admin_hold(

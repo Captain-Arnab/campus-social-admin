@@ -31,6 +31,10 @@ if (php_sapi_name() !== 'cli') {
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/../event_delete_helper.php';
 require_once __DIR__ . '/../event_date_range_schema.php';
+if (file_exists(__DIR__ . '/fcm_helper.php')) {
+    require_once __DIR__ . '/fcm_helper.php';
+}
+require_once __DIR__ . '/app_inbox_notifications_helper.php';
 
 function cleanup_log(string $level, string $msg): void
 {
@@ -103,6 +107,7 @@ cleanup_log('INFO', 'Starting cleanup; candidates=' . count($candidates));
 foreach ($candidates as $row) {
     $eid = (int) $row['id'];
     $title = (string) ($row['title'] ?? '');
+    $organizerId = (int) ($row['organizer_id'] ?? 0);
     try {
         $conn->begin_transaction();
         $ok = event_hard_delete($conn, $eid, 'expired_pending');
@@ -113,6 +118,13 @@ foreach ($candidates as $row) {
         $summary['deleted']++;
         $summary['events'][] = ['id' => $eid, 'title' => $title, 'reason' => 'expired_pending'];
         cleanup_log('INFO', "DELETED event_id={$eid} title=\"{$title}\" reason=expired_pending");
+
+        // After successful delete (same delivery path as admin reject)
+        try {
+            campus_inbox_after_expired_pending($conn, $eid, $organizerId, $title);
+        } catch (Throwable $ne) {
+            cleanup_log('WARN', "NOTIFY failed event_id={$eid}: " . $ne->getMessage());
+        }
     } catch (Throwable $e) {
         $conn->rollback();
         $summary['failed']++;

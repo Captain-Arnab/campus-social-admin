@@ -326,6 +326,58 @@ function event_user_has_paid_lock(mysqli $conn, int $eventId, int $userId): bool
     return false;
 }
 
+/**
+ * Current join row for a user on an event (for event GET my_registration).
+ * Preference when multiple (should be rare): volunteer → participant → attendee.
+ *
+ * @return array{role:string,payment_status:string}|null
+ */
+function event_user_my_registration(mysqli $conn, int $eventId, int $userId): ?array
+{
+    if ($eventId <= 0 || $userId <= 0) {
+        return null;
+    }
+
+    $checks = [
+        ['role' => 'volunteer', 'table' => 'volunteers', 'extra' => " AND status = 'active'"],
+        ['role' => 'participant', 'table' => 'participant', 'extra' => " AND status = 'active'"],
+        ['role' => 'attendee', 'table' => 'attendees', 'extra' => ''],
+    ];
+
+    foreach ($checks as $c) {
+        $psSelect = schema_join_has_payment_status($conn, $c['table'])
+            ? 'payment_status'
+            : "'n/a' AS payment_status";
+        $sql = "SELECT {$psSelect} FROM `{$c['table']}`
+                WHERE event_id = ? AND user_id = ?{$c['extra']} LIMIT 1";
+        $st = $conn->prepare($sql);
+        if (!$st) {
+            continue;
+        }
+        $st->bind_param('ii', $eventId, $userId);
+        $st->execute();
+        $row = $st->get_result()->fetch_assoc();
+        $st->close();
+        if (!$row) {
+            continue;
+        }
+        $ps = strtolower(trim((string) ($row['payment_status'] ?? 'n/a')));
+        if (!in_array($ps, ['n/a', 'pending', 'paid'], true)) {
+            $ps = 'n/a';
+        }
+        // Ledger fallback if join row still n/a but payment confirmed
+        if ($ps !== 'paid' && event_role_is_paid_locked($conn, $eventId, $userId, $c['role'])) {
+            $ps = 'paid';
+        }
+        return [
+            'role' => $c['role'],
+            'payment_status' => $ps,
+        ];
+    }
+
+    return null;
+}
+
 function event_paid_lock_error(): array
 {
     return [
