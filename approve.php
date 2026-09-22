@@ -83,8 +83,8 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
 
         $conn->begin_transaction();
         try {
-            if (!admin_delete_event_permanently($conn, $id)) {
-                throw new Exception('Event delete failed');
+            if (!event_hard_delete($conn, $id, 'rejected')) {
+                throw new Exception('Event hard delete failed');
             }
             $conn->commit();
             header("Location: dashboard.php?msg=reject");

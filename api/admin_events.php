@@ -223,8 +223,8 @@ if (in_array($action, ['approve', 'reject', 'hold', 'reschedule'], true)) {
         }
         $conn->begin_transaction();
         try {
-            if (!admin_delete_event_permanently($conn, $eventId)) {
-                throw new Exception('Event delete failed');
+            if (!event_hard_delete($conn, $eventId, 'rejected')) {
+                throw new Exception('Event hard delete failed');
             }
             $conn->commit();
             echo json_encode(['status' => 'success', 'message' => 'Event rejected and removed', 'action' => 'reject']);
