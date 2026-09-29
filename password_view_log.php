@@ -47,9 +47,9 @@ if ($schema_ok) {
             $rows[] = $r;
         }
     }
-    $counts = $conn->query("SELECT COUNT(*) AS total, SUM(password_encrypted IS NOT NULL) AS stored FROM users")->fetch_assoc();
-    $user_count = (int) ($counts['total'] ?? 0);
-    $stored_count = (int) ($counts['stored'] ?? 0);
+    $counts = $conn->query("SELECT COUNT(*) AS total_users, SUM(password_encrypted IS NOT NULL) AS viewable_users FROM users")->fetch_assoc();
+    $user_count = (int) ($counts['total_users'] ?? 0);
+    $stored_count = (int) ($counts['viewable_users'] ?? 0);
 } else {
     $total_pages = 1;
 }

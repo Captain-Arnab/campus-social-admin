@@ -109,10 +109,20 @@ function password_vault_ensure_schema(mysqli $conn): bool
     if ($ok !== null) {
         return $ok;
     }
+    try {
+        $ok = password_vault_ensure_schema_inner($conn);
+    } catch (Throwable $e) {
+        error_log('[password_vault] schema check failed: ' . $e->getMessage());
+        $ok = false;
+    }
+    return $ok;
+}
+
+function password_vault_ensure_schema_inner(mysqli $conn): bool
+{
     $col = @$conn->query("SHOW COLUMNS FROM users LIKE 'password_encrypted'");
     if (!$col) {
-        $ok = false;
-        return $ok;
+        return false;
     }
     if ($col->num_rows === 0) {
         $added = @$conn->query(
@@ -121,11 +131,10 @@ function password_vault_ensure_schema(mysqli $conn): bool
         );
         if (!$added) {
             error_log('[password_vault] could not add users.password_encrypted: ' . $conn->error);
-            $ok = false;
-            return $ok;
+            return false;
         }
     }
-    $ok = (bool) @$conn->query(
+    return (bool) @$conn->query(
         "CREATE TABLE IF NOT EXISTS `password_view_log` (
           `id` int NOT NULL AUTO_INCREMENT,
           `admin_id` int NOT NULL COMMENT 'admins.id or subadmins.id depending on admin_type',
@@ -140,7 +149,6 @@ function password_vault_ensure_schema(mysqli $conn): bool
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
         COMMENT='Audit: every successful admin reveal of a user password'"
     );
-    return $ok;
 }
 
 /**
