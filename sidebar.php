@@ -429,6 +429,11 @@ if ($user_type == 'admin') {
                     <i class="fas fa-user-shield"></i> Sub-admins
                 </a>
             </li>
+            <li class="nav-item">
+                <a href="password_view_log.php" class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'password_view_log.php' ? 'active' : ''; ?>">
+                    <i class="fas fa-user-secret"></i> Password view log
+                </a>
+            </li>
             <?php endif; ?>
             <?php endif; ?>
         </ul>

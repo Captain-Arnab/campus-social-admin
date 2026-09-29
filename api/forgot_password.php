@@ -20,6 +20,7 @@ include __DIR__ . '/db.php';
 require_once __DIR__ . '/sms_helper.php';
 require_once __DIR__ . '/background_jobs_helper.php';
 require_once __DIR__ . '/smtp_config.php';
+require_once __DIR__ . '/../password_vault.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
@@ -367,9 +368,7 @@ if ($action === 'reset') {
         exit();
     }
 
-    $hash = password_hash($password, PASSWORD_DEFAULT);
-    $h = $conn->real_escape_string($hash);
-    if (!$conn->query("UPDATE users SET password = '$h' WHERE id = $matchedUser")) {
+    if (!user_password_update($conn, $matchedUser, $password)) {
         echo json_encode(['status' => 'error', 'message' => 'Update failed']);
         exit();
     }

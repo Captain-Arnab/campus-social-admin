@@ -46,9 +46,8 @@ if (isset($_POST['login'])) {
                     $privs[] = $row['privilege'];
                 }
             }
-            $all_keys = array_keys(subadmin_privilege_definitions());
             if (empty($privs)) {
-                $privs = $all_keys;
+                $privs = subadmin_default_privilege_keys();
             }
             $_SESSION['subadmin_privileges'] = $privs;
 

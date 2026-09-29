@@ -8,6 +8,7 @@ require_once __DIR__ . '/sms_helper.php';
 require_once __DIR__ . '/background_jobs_helper.php';
 require_once __DIR__ . '/api_timing_helper.php';
 require_once __DIR__ . '/../portal_auth.php';
+require_once __DIR__ . '/../password_vault.php';
 $method = $_SERVER['REQUEST_METHOD'];
 
 // Helper for security
@@ -156,6 +157,7 @@ if ($method == 'POST') {
         
         if ($conn->query($sql)) {
             $user_id = (int)$conn->insert_id;
+            password_vault_store_for_new_user($conn, $user_id, (string) $data['password']);
             
             // Insert into student_faculty table
             if ($is_student == 1) {
@@ -815,8 +817,8 @@ if ($method == 'GET') {
                     // Match desktop login: empty privilege set means full access
                     if ($admin_privileges === []) {
                         require_once __DIR__ . '/../admin_priv.php';
-                        if (function_exists('subadmin_privilege_definitions')) {
-                            $admin_privileges = array_keys(subadmin_privilege_definitions());
+                        if (function_exists('subadmin_default_privilege_keys')) {
+                            $admin_privileges = subadmin_default_privilege_keys();
                         }
                     }
                     $can_approve_events = in_array('approve_events', $admin_privileges, true);

@@ -8,6 +8,25 @@ if ((!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) || !isset($_GE
     exit();
 }
 require_priv('manage_users');
+require_once __DIR__ . '/password_vault.php';
+
+$can_view_passwords = has_priv('view_user_passwords') && password_vault_ensure_schema($conn);
+$reveal_admin_id = 0;
+if ($can_view_passwords) {
+    if (is_main_admin()) {
+        $aStmt = $conn->prepare('SELECT id FROM admins WHERE username = ? LIMIT 1');
+        $aName = (string) $_SESSION['admin'];
+        $aStmt->bind_param('s', $aName);
+        $aStmt->execute();
+        $reveal_admin_id = (int) ($aStmt->get_result()->fetch_assoc()['id'] ?? 0);
+        $aStmt->close();
+    } else {
+        $reveal_admin_id = (int) ($_SESSION['subadmin_id'] ?? 0);
+    }
+    if (empty($_SESSION['pw_reveal_csrf'])) {
+        $_SESSION['pw_reveal_csrf'] = bin2hex(random_bytes(32));
+    }
+}
 
 $user_id = intval($_GET['id']);
 // Fetching user details securely (with institution name)
@@ -95,6 +114,14 @@ $participated_events = $conn->query("
         .badge-category { font-size: 0.6rem; background: #e3f2fd; color: #1976d2; }
 
         .bio-text { color: #636e72; font-size: 0.95rem; line-height: 1.7; }
+
+        .pw-field { display: flex; align-items: center; gap: 8px; background: #f8f9fa; border: 1px solid #eee; border-radius: 12px; padding: 8px 8px 8px 14px; }
+        .pw-value { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.95rem; letter-spacing: 1px; word-break: break-all; color: #2d3436; }
+        .pw-value.is-masked { letter-spacing: 3px; color: #7f8c8d; }
+        .pw-toggle { border: none; background: var(--brand-soft); color: var(--brand-color); width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0; }
+        .pw-toggle:hover { background: var(--brand-color); color: #fff; }
+        .pw-toggle:disabled { opacity: 0.6; }
+        .pw-na { background: #fff8e1; border: 1px solid #ffe082; color: #8d6e00; border-radius: 12px; padding: 10px 14px; font-size: 0.85rem; }
     </style>
 </head>
 <body>
@@ -165,6 +192,27 @@ $participated_events = $conn->query("
                 <div class="row g-5">
                     <!-- Bio & Interests -->
                     <div class="col-lg-3 border-end border-light">
+                        <?php if ($can_view_passwords): ?>
+                        <div class="mb-5">
+                            <h6 class="section-title small text-muted text-uppercase letter-spacing-1">
+                                <i class="fas fa-key"></i> Password
+                            </h6>
+                            <?php if (!empty($user['password_encrypted'])): ?>
+                                <div class="pw-field">
+                                    <span id="pwValue" class="pw-value is-masked" aria-live="polite">••••••••</span>
+                                    <button type="button" id="pwToggle" class="pw-toggle" title="Show password" aria-label="Show password">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                                <div class="small text-muted mt-2"><i class="fas fa-shield-alt me-1"></i>Requires your admin password. Every reveal is logged.</div>
+                            <?php else: ?>
+                                <div class="pw-na">
+                                    <div class="fw-bold mb-1"><i class="fas fa-lock me-1"></i> Not available</div>
+                                    This password was set before password viewing was enabled. Ask the user to reset their password (Forgot password in the app); it will be viewable after that.
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
                         <div class="mb-5">
                             <h6 class="section-title small text-muted text-uppercase letter-spacing-1">
                                 <i class="fas fa-id-card"></i> Biography
@@ -301,5 +349,110 @@ $participated_events = $conn->query("
             });
         }
     </script>
+    <?php if ($can_view_passwords && !empty($user['password_encrypted'])): ?>
+    <script>
+    (function () {
+        const cfg = <?php echo json_encode([
+            'adminId' => $reveal_admin_id,
+            'targetUserId' => (int) $user_id,
+            'csrf' => (string) $_SESSION['pw_reveal_csrf'],
+        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const AUTO_HIDE_MS = 60000;
+        const valueEl = document.getElementById('pwValue');
+        const toggleBtn = document.getElementById('pwToggle');
+        let revealed = false;
+        let hideTimer = null;
+
+        function setToggle(isShown) {
+            toggleBtn.innerHTML = isShown ? '<i class="fas fa-eye-slash"></i>' : '<i class="fas fa-eye"></i>';
+            toggleBtn.title = isShown ? 'Hide password' : 'Show password';
+            toggleBtn.setAttribute('aria-label', toggleBtn.title);
+        }
+
+        function hidePassword() {
+            if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+            valueEl.textContent = '••••••••';
+            valueEl.classList.add('is-masked');
+            revealed = false;
+            setToggle(false);
+        }
+
+        function showPassword(plain) {
+            valueEl.textContent = plain;
+            valueEl.classList.remove('is-masked');
+            revealed = true;
+            setToggle(true);
+            hideTimer = setTimeout(hidePassword, AUTO_HIDE_MS);
+        }
+
+        async function requestReveal(adminPassword) {
+            const res = await fetch('api/admin_users.php?action=reveal_password', {
+                method: 'POST',
+                credentials: 'same-origin',
+                cache: 'no-store',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    admin_id: cfg.adminId,
+                    admin_password: adminPassword,
+                    target_user_id: cfg.targetUserId,
+                    csrf_token: cfg.csrf
+                })
+            });
+            let json = null;
+            try { json = await res.json(); } catch (e) { /* non-JSON error page */ }
+            return json || { status: 'error', message: 'Unexpected server response (HTTP ' + res.status + ').' };
+        }
+
+        toggleBtn.addEventListener('click', function () {
+            if (revealed) { hidePassword(); return; }
+            Swal.fire({
+                title: 'Confirm it\'s you',
+                html: 'Enter <b>your own admin password</b> to reveal this user\'s password.<br><small class="text-muted">This reveal will be recorded in the audit log.</small>',
+                icon: 'warning',
+                input: 'password',
+                inputPlaceholder: 'Your admin password',
+                inputAttributes: { autocomplete: 'current-password', autocapitalize: 'off', autocorrect: 'off' },
+                showCancelButton: true,
+                confirmButtonText: 'Reveal',
+                confirmButtonColor: '#FF5F15',
+                showLoaderOnConfirm: true,
+                allowOutsideClick: () => !Swal.isLoading(),
+                preConfirm: async (adminPassword) => {
+                    if (!adminPassword) {
+                        Swal.showValidationMessage('Please enter your admin password');
+                        return false;
+                    }
+                    try {
+                        const json = await requestReveal(adminPassword);
+                        if (json.status === 'success' && typeof json.password === 'string') {
+                            return json.password;
+                        }
+                        if (json.code === 'bad_admin_password') {
+                            Swal.showValidationMessage(json.message);
+                            return false;
+                        }
+                        return { error: json.message || 'Could not reveal password.' };
+                    } catch (e) {
+                        Swal.showValidationMessage('Network error. Please try again.');
+                        return false;
+                    }
+                }
+            }).then((result) => {
+                if (!result.isConfirmed) return;
+                if (typeof result.value === 'string') {
+                    showPassword(result.value);
+                } else if (result.value && result.value.error) {
+                    Swal.fire({ icon: 'error', title: 'Not revealed', text: result.value.error, confirmButtonColor: '#FF5F15' });
+                }
+            });
+        });
+
+        document.addEventListener('visibilitychange', function () {
+            if (document.hidden && revealed) hidePassword();
+        });
+        window.addEventListener('pagehide', hidePassword);
+    })();
+    </script>
+    <?php endif; ?>
 </body>
 </html>

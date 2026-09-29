@@ -51,5 +51,21 @@ function subadmin_privilege_definitions(): array
         'app_settings' => 'App settings (logo, branding)',
         'ad_posts' => 'Advertisement posts (home screen banners)',
         'institutions' => 'Institutions (list, add, edit, deactivate)',
+        'view_user_passwords' => 'View user passwords (SENSITIVE — reveals student/faculty passwords; every reveal is audit-logged)',
     ];
+}
+
+/**
+ * Privileges that are never granted implicitly (e.g. the "no rows = full access" fallback
+ * for legacy sub-admins). They must be ticked explicitly per sub-admin.
+ */
+function subadmin_sensitive_privileges(): array
+{
+    return ['view_user_passwords'];
+}
+
+/** Privileges granted to a sub-admin that has no explicit privilege rows. */
+function subadmin_default_privilege_keys(): array
+{
+    return array_values(array_diff(array_keys(subadmin_privilege_definitions()), subadmin_sensitive_privileges()));
 }

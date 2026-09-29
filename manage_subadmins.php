@@ -13,6 +13,7 @@ if (!is_main_admin()) {
 }
 
 $defs = subadmin_privilege_definitions();
+$sensitive_privs = subadmin_sensitive_privileges();
 $err = '';
 
 function subadmin_flash_redirect(string $message, string $type = 'success', ?string $query = null): void
@@ -295,7 +296,7 @@ if ($edit_id > 0) {
                         <div class="col-md-6 mb-2">
                             <label class="d-flex align-items-center gap-2">
                                 <input type="checkbox" name="privileges[]" value="<?php echo htmlspecialchars($key); ?>">
-                                <span><?php echo htmlspecialchars($label); ?></span>
+                                <span class="<?php echo in_array($key, $sensitive_privs, true) ? 'text-danger fw-semibold' : ''; ?>"><?php echo htmlspecialchars($label); ?></span>
                             </label>
                         </div>
                         <?php endforeach; ?>
@@ -404,7 +405,7 @@ if ($edit_id > 0) {
                             <div class="col-md-6 mb-2">
                                 <label class="d-flex align-items-center gap-2">
                                     <input type="checkbox" name="privileges[]" value="<?php echo htmlspecialchars($key); ?>" class="edit-subadmin-priv">
-                                    <span><?php echo htmlspecialchars($label); ?></span>
+                                    <span class="<?php echo in_array($key, $sensitive_privs, true) ? 'text-danger fw-semibold' : ''; ?>"><?php echo htmlspecialchars($label); ?></span>
                                 </label>
                             </div>
                             <?php endforeach; ?>
