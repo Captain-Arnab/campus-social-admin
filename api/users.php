@@ -766,7 +766,14 @@ if ($method == 'GET') {
     authorize();
     $id = intval($_GET['id']);
     
-    $user = $conn->query("SELECT id, full_name, email, phone, bio, interests, profile_pic, is_student FROM users WHERE id=$id")->fetch_assoc();
+    $user = $conn->query(
+        "SELECT users.id, users.full_name, users.email, users.phone, users.bio, users.interests,
+                users.profile_pic, users.is_student, users.institution_id,
+                institutions.name AS institution_name
+         FROM users
+         LEFT JOIN institutions ON institutions.id = users.institution_id
+         WHERE users.id = $id"
+    )->fetch_assoc();
     
     if ($user) {
         $user_id = (int)$user['id'];
@@ -839,6 +846,8 @@ if ($method == 'GET') {
                 "interests" => $user['interests'],
                 "profile_pic" => $user['profile_pic'],
                 "is_student" => (int)$user['is_student'],
+                "institution_id" => $user['institution_id'] !== null ? (int) $user['institution_id'] : null,
+                "institution_name" => $user['institution_name'],
                 "department_class" => $sf_data['department_class'] ?? null,
                 "links" => $links,
                 "linked_subadmin_id" => $linked_subadmin_id,
