@@ -52,7 +52,8 @@ $endedAt = $hasEndDate ? 'COALESCE(e.event_end_date, e.event_date)' : 'e.event_d
 
 $sql = "SELECT w.user_id, w.position, w.created_at,
                " . ($hasPhoto ? 'w.photo_path' : 'NULL AS photo_path') . ",
-               u.full_name AS winner_name, u.profile_pic AS winner_avatar,
+               u.full_name AS winner_name, u.profile_pic AS winner_avatar, u.is_student AS winner_is_student,
+               (SELECT sf.department_class FROM student_faculty sf WHERE sf.user_id = u.id ORDER BY sf.id LIMIT 1) AS winner_department_class,
                e.id AS event_id, e.title AS event_name, e.status AS event_status, e.event_date,
                " . ($hasClosedAt ? 'e.closed_at' : 'NULL AS closed_at') . "
         FROM event_winners w
@@ -77,6 +78,8 @@ while ($row = $res->fetch_assoc()) {
         'user_id' => (int) $row['user_id'],
         'winner_name' => $row['winner_name'],
         'winner_avatar' => $row['winner_avatar'],
+        'winner_department_class' => $row['winner_department_class'],
+        'winner_is_student' => (int) $row['winner_is_student'],
         'position' => (int) $row['position'],
         'event_id' => (int) $row['event_id'],
         'event_name' => $row['event_name'],
