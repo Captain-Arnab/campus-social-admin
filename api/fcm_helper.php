@@ -205,9 +205,24 @@ function fcm_send_to_token(
         10
     );
 
-    $result['response']  = $resp['body'] ?: '';
-    $result['http_code'] = $resp['http_code'];
-    $code                = $resp['http_code'];
+    return _fcm_classify_response($resp);
+}
+
+/**
+ * Map one messages:send HTTP response to the fcm_send_to_token() result shape.
+ *
+ * @param array{body: string|false, http_code: int, error: string} $resp
+ * @return array{ok: bool, http_code: int, invalid_token: bool, retryable: bool, response: string}
+ */
+function _fcm_classify_response(array $resp): array {
+    $code   = (int) $resp['http_code'];
+    $result = [
+        'ok'            => false,
+        'http_code'     => $code,
+        'invalid_token' => false,
+        'retryable'     => false,
+        'response'      => $resp['body'] ?: '',
+    ];
 
     if ($resp['body'] === false) {
         $result['response'] = 'HTTP request failed: ' . $resp['error'];
@@ -235,7 +250,7 @@ function fcm_send_to_token(
         }
     }
 
-    if ($code === 500 || $code === 503) {
+    if ($code === 429 || $code === 500 || $code === 503) {
         $result['retryable'] = true;
     }
 
@@ -317,6 +332,151 @@ function fcm_send_to_tokens(
             }
             $errors[] = $errDetail;
         }
+    }
+
+    if (!empty($invalid)) {
+        fcm_invalidate_tokens($invalid);
+    }
+
+    return [
+        'success'        => $success,
+        'failed'         => $failed,
+        'invalid_tokens' => $invalid,
+        'errors'         => $errors,
+    ];
+}
+
+// ─── Concurrent bulk send (large fan-outs) ───────────────────────────────────
+
+/**
+ * Same contract as fcm_send_to_tokens(), but sends in chunks of $concurrency parallel
+ * requests over curl_multi (HTTP/2 multiplexed). FCM HTTP v1 has no multicast endpoint,
+ * so this is how thousands of tokens are delivered in seconds instead of minutes.
+ *
+ * Env FCM_VALIDATE_ONLY=1 makes FCM validate every message without delivering it
+ * (useful on staging/local DBs that hold real device tokens).
+ *
+ * @return array{success: int, failed: int, invalid_tokens: string[], errors: string[]}
+ */
+function fcm_send_to_tokens_batched(
+    array  $tokens,
+    string $title,
+    string $body,
+    array  $data = [],
+    int    $concurrency = 50,
+    int    $maxRetries = 2
+): array {
+    if (!function_exists('curl_multi_init')) {
+        return fcm_send_to_tokens($tokens, $title, $body, $data, $maxRetries);
+    }
+
+    global $firebase_project_id;
+
+    $tokens  = array_values(array_unique(array_filter($tokens)));
+    $success = 0;
+    $failed  = 0;
+    $invalid = [];
+    $errors  = [];
+
+    $pending = [];
+    foreach ($tokens as $token) {
+        if (!fcm_is_plausible_token($token)) {
+            $failed++;
+            $invalid[] = $token;
+            $errors[]  = 'token=' . substr($token, 0, 12) . '… REJECTED (not a valid FCM token format)';
+            continue;
+        }
+        $pending[] = $token;
+    }
+
+    $access_token = $pending ? fcm_get_access_token() : null;
+    if ($pending && !$access_token) {
+        $failed  += count($pending);
+        $errors[] = 'Could not obtain OAuth2 token';
+        $pending  = [];
+    }
+
+    $url     = "https://fcm.googleapis.com/v1/projects/{$firebase_project_id}/messages:send";
+    $headers = ['Content-Type: application/json', "Authorization: Bearer {$access_token}"];
+    $message = ['notification' => ['title' => $title, 'body' => $body]];
+    if (!empty($data)) {
+        $stringData = [];
+        foreach ($data as $k => $v) {
+            $stringData[(string) $k] = is_scalar($v) || $v === null ? (string) $v : json_encode($v, JSON_UNESCAPED_UNICODE);
+        }
+        $message['data'] = $stringData;
+    }
+    $validateOnly = (string) getenv('FCM_VALIDATE_ONLY') === '1';
+    $concurrency  = max(1, min(200, $concurrency));
+
+    for ($attempt = 0; $attempt <= $maxRetries && $pending; $attempt++) {
+        if ($attempt > 0) {
+            sleep($attempt);
+        }
+        $retry = [];
+        foreach (array_chunk($pending, $concurrency) as $chunk) {
+            $mh      = curl_multi_init();
+            $handles = [];
+            if (defined('CURLMOPT_PIPELINING') && defined('CURLPIPE_MULTIPLEX')) {
+                curl_multi_setopt($mh, CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
+            }
+            foreach ($chunk as $i => $token) {
+                $payload = ['message' => ['token' => $token] + $message];
+                if ($validateOnly) {
+                    $payload['validate_only'] = true;
+                }
+                $ch = curl_init($url);
+                curl_setopt_array($ch, [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_POST           => true,
+                    CURLOPT_POSTFIELDS     => json_encode($payload),
+                    CURLOPT_HTTPHEADER     => $headers,
+                    CURLOPT_TIMEOUT        => 15,
+                    CURLOPT_SSL_VERIFYPEER => true,
+                ]);
+                if (defined('CURL_HTTP_VERSION_2TLS')) {
+                    curl_setopt($ch, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+                }
+                curl_multi_add_handle($mh, $ch);
+                $handles[$i] = $ch;
+            }
+
+            do {
+                $status = curl_multi_exec($mh, $running);
+                if ($running) {
+                    curl_multi_select($mh, 1.0);
+                }
+            } while ($running && $status === CURLM_OK);
+
+            foreach ($handles as $i => $ch) {
+                $raw = curl_multi_getcontent($ch);
+                $err = curl_error($ch);
+                $res = _fcm_classify_response([
+                    'body'      => ($raw === null || ($raw === '' && $err !== '')) ? false : (string) $raw,
+                    'http_code' => (int) curl_getinfo($ch, CURLINFO_HTTP_CODE),
+                    'error'     => $err,
+                ]);
+                curl_multi_remove_handle($mh, $ch);
+                curl_close($ch);
+
+                $token = $chunk[$i];
+                if ($res['ok']) {
+                    $success++;
+                } elseif ($res['invalid_token']) {
+                    $failed++;
+                    $invalid[] = $token;
+                } elseif ($res['retryable'] && $attempt < $maxRetries) {
+                    $retry[] = $token;
+                } else {
+                    $failed++;
+                    $decoded  = json_decode($res['response'], true);
+                    $errors[] = 'token=' . substr($token, 0, 12) . '… http=' . $res['http_code'] . ' '
+                        . ($decoded['error']['message'] ?? $decoded['error']['status'] ?? substr($res['response'], 0, 80));
+                }
+            }
+            curl_multi_close($mh);
+        }
+        $pending = $retry;
     }
 
     if (!empty($invalid)) {

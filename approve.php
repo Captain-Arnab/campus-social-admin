@@ -139,6 +139,10 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
             }
         }
 
+        if ($new_status === 'approved') {
+            campus_event_enqueue_first_publish_broadcast($conn, $id);
+        }
+
         // Redirect with success message
         header("Location: dashboard.php?msg=" . $action);
     } else {

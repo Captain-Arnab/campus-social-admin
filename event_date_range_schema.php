@@ -165,6 +165,34 @@ function schema_events_has_closed_status($conn): bool {
 }
 
 /**
+ * After uploads/migrations/010_event_featured_first_published.sql.
+ *
+ * @param mysqli $conn
+ */
+function schema_events_has_is_featured($conn): bool {
+    static $v = null;
+    if ($v !== null) {
+        return $v;
+    }
+    $r = @$conn->query("SHOW COLUMNS FROM events LIKE 'is_featured'");
+    $v = ($r && $r->num_rows > 0);
+    return $v;
+}
+
+/**
+ * @param mysqli $conn
+ */
+function schema_events_has_first_published_notified($conn): bool {
+    static $v = null;
+    if ($v !== null) {
+        return $v;
+    }
+    $r = @$conn->query("SHOW COLUMNS FROM events LIKE 'first_published_notified'");
+    $v = ($r && $r->num_rows > 0);
+    return $v;
+}
+
+/**
  * App/campus wall-clock timezone. Deadlines are stored as naive datetimes in this zone
  * (MySQL DATETIME has no offset). Never use PHP's default php.ini timezone for compares.
  */

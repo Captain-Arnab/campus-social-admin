@@ -161,6 +161,44 @@ function campus_inbox_after_event_created(
 }
 
 /**
+ * Call after any path that sets events.status = 'approved'. Enqueues the
+ * new_event_published broadcast (all active users) only the first time the event
+ * ever goes live; later edit re-approvals / reschedules are no-ops.
+ *
+ * @return int background job id, or 0 when nothing was enqueued
+ */
+function campus_event_enqueue_first_publish_broadcast($conn, int $event_id): int
+{
+    require_once __DIR__ . '/../event_date_range_schema.php';
+    if ($event_id <= 0 || !schema_events_has_first_published_notified($conn)) {
+        return 0;
+    }
+
+    $st = $conn->prepare(
+        "UPDATE events SET first_published_notified = 1
+          WHERE id = ? AND status = 'approved' AND first_published_notified = 0"
+    );
+    if (!$st) {
+        return 0;
+    }
+    $st->bind_param('i', $event_id);
+    $st->execute();
+    $claimed = ($st->affected_rows === 1);
+    $st->close();
+    if (!$claimed) {
+        return 0;
+    }
+
+    require_once __DIR__ . '/background_jobs_helper.php';
+    $jobId = bg_jobs_enqueue($conn, 'new_event_published', ['event_id' => $event_id]);
+    if ($jobId <= 0) {
+        // Let a later approval retry rather than silently losing the broadcast.
+        @$conn->query('UPDATE events SET first_published_notified = 0 WHERE id = ' . (int) $event_id);
+    }
+    return $jobId;
+}
+
+/**
  * Inbox + FCM + notification_log for the event organizer (single user).
  *
  * @param array $fcm_data string values for FCM data payload (merged with event_id, notification_type)

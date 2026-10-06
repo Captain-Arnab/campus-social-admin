@@ -162,6 +162,7 @@ if ($action === 'approve') {
             'event_id' => $id,
             'title' => $titlePlain,
         ]);
+        campus_event_enqueue_first_publish_broadcast($conn, $id);
 
         if ($minutesId > 0) {
             bg_jobs_enqueue($conn, 'minutes_approved_notify', [

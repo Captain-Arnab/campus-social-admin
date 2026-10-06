@@ -1,7 +1,7 @@
 <?php
 /**
  * Fan-out inbox + FCM to attendees, participants, volunteers, organizer, editors.
- * Used by background jobs: event_approved_notify, minutes_approved_notify.
+ * Used by background jobs: event_approved_notify, minutes_approved_notify, new_event_published (all active users).
  */
 require_once __DIR__ . '/app_inbox_notifications_helper.php';
 require_once __DIR__ . '/fcm_helper.php';
@@ -122,6 +122,109 @@ function process_job_event_approved_notify($conn, array $payload): void
         'Updates to "' . $titlePlain . '" are now live.',
         ['kind' => 'event_approved_notify']
     );
+}
+
+/**
+ * First publish of an event → inbox + push to EVERY active user (not just stakeholders).
+ * Enqueued once by campus_event_enqueue_first_publish_broadcast().
+ * Inbox insert is set-based and skips users who already have the row, so a retried
+ * job never duplicates inbox entries.
+ */
+function process_job_new_event_published($conn, array $payload): void
+{
+    $eventId = (int) ($payload['event_id'] ?? 0);
+    if ($eventId <= 0) {
+        throw new InvalidArgumentException('event_id required');
+    }
+    @set_time_limit(0);
+
+    $r = $conn->query("SELECT id, title, venue, event_date, category FROM events WHERE id = $eventId LIMIT 1");
+    $ev = $r ? $r->fetch_assoc() : null;
+    if (!$ev) {
+        return;
+    }
+
+    $type       = 'new_event_published';
+    $titlePlain = (string) $ev['title'];
+    $ts         = strtotime((string) $ev['event_date']);
+    $dateFmt    = $ts ? date('D, M j, Y', $ts) : (string) $ev['event_date'];
+    $title      = 'New event: ' . $titlePlain;
+    $body       = 'Check out ' . $titlePlain . ', happening on ' . $dateFmt . ' at ' . (string) $ev['venue'] . '.';
+    $data       = [
+        'type'              => $type,
+        'event_id'          => $eventId,
+        'notification_type' => $type,
+    ];
+
+    if (campus_inbox_table_exists($conn)) {
+        $dataStr = json_encode($data, JSON_UNESCAPED_UNICODE);
+        $st = $conn->prepare(
+            "INSERT INTO user_inbox_notifications (user_id, notification_type, title, body, event_id, data_json)
+             SELECT u.id, ?, ?, ?, ?, ?
+               FROM users u
+              WHERE u.status = 'active'
+                AND NOT EXISTS (
+                  SELECT 1 FROM user_inbox_notifications n
+                   WHERE n.event_id = ? AND n.notification_type = ? AND n.user_id = u.id
+                )"
+        );
+        if (!$st) {
+            throw new RuntimeException('inbox prepare failed: ' . $conn->error);
+        }
+        $st->bind_param('sssisis', $type, $title, $body, $eventId, $dataStr, $eventId, $type);
+        if (!$st->execute()) {
+            $err = $st->error;
+            $st->close();
+            throw new RuntimeException('inbox insert failed: ' . $err);
+        }
+        $st->close();
+    }
+
+    $activeFilter = '';
+    $colCheck = @$conn->query("SHOW COLUMNS FROM user_fcm_tokens LIKE 'is_active'");
+    if ($colCheck && $colCheck->num_rows > 0) {
+        $activeFilter = ' AND (t.is_active = 1 OR t.is_active IS NULL)';
+    }
+    $tr = $conn->query(
+        "SELECT DISTINCT t.fcm_token
+           FROM user_fcm_tokens t
+           INNER JOIN users u ON u.id = t.user_id
+          WHERE u.status = 'active' AND t.fcm_token IS NOT NULL AND t.fcm_token != ''{$activeFilter}"
+    );
+    $tokens = [];
+    if ($tr) {
+        while ($row = $tr->fetch_assoc()) {
+            $tokens[] = (string) $row['fcm_token'];
+        }
+    }
+    if ($tokens === []) {
+        return;
+    }
+
+    // Push is best-effort: never throw past this point, or a retry would re-push everyone.
+    try {
+        $out = fcm_send_to_tokens_batched($tokens, $title, $body, $data);
+    } catch (Throwable $e) {
+        error_log('[new_event_published] FCM: ' . $e->getMessage());
+        $out = ['success' => 0, 'failed' => count($tokens), 'errors' => [$e->getMessage()]];
+    }
+    $sent   = (int) $out['success'];
+    $failed = (int) $out['failed'];
+
+    fcm_log_notification([
+        'type'            => $type,
+        'ref_id'          => $eventId,
+        'ref_date'        => date('Y-m-d'),
+        'title'           => $title,
+        'body'            => $body,
+        'recipient_type'  => 'all',
+        'event_id'        => $eventId,
+        'tokens_targeted' => count($tokens),
+        'tokens_sent'     => $sent,
+        'tokens_failed'   => $failed,
+        'status'          => ($failed === 0) ? 'sent' : (($sent === 0) ? 'failed' : 'partial'),
+        'error_message'   => !empty($out['errors']) ? implode(' | ', array_slice($out['errors'], 0, 5)) : '',
+    ]);
 }
 
 function process_job_minutes_approved_notify($conn, array $payload): void

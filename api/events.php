@@ -125,6 +125,8 @@ function events_api_enrich_event_row(array &$row): void
 {
     require_once __DIR__ . '/registration_leave_helper.php';
     $row['viewer_count'] = isset($row['attendee_count']) ? (int) $row['attendee_count'] : 0;
+    $row['is_featured'] = (int) ($row['is_featured'] ?? 0);
+    unset($row['first_published_notified']);
     $q = getenv('MICAMPUS_EVENT_SHARE_PATH');
     $path = ($q !== false && $q !== '') ? $q : '/event?id=';
     if ($path[0] !== '/') {
@@ -207,6 +209,7 @@ if ($method == 'GET') {
     $view = isset($_GET['type']) ? $_GET['type'] : 'live';
     $search_query = events_api_get_search_string();
     $category_filter = isset($_GET['category']) ? trim((string) $_GET['category']) : '';
+    $featured_only = filter_var($_GET['featured'] ?? false, FILTER_VALIDATE_BOOLEAN);
     $user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
     $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 
@@ -347,6 +350,10 @@ if ($method == 'GET') {
         if ($category_filter !== '') {
             $category_esc = $conn->real_escape_string($category_filter);
             $sql .= " AND e.category = '$category_esc'";
+        }
+
+        if ($featured_only) {
+            $sql .= schema_events_has_is_featured($conn) ? ' AND e.is_featured = 1' : ' AND 1=0';
         }
     }
 

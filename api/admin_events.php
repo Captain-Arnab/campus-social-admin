@@ -279,6 +279,10 @@ if (in_array($action, ['approve', 'reject', 'hold', 'reschedule'], true)) {
         error_log('[admin_events.php] inbox: ' . $e->getMessage());
     }
 
+    if ($new_status === 'approved') {
+        campus_event_enqueue_first_publish_broadcast($conn, $eventId);
+    }
+
     echo json_encode([
         'status' => 'success',
         'message' => 'Event ' . $action . 'd',
@@ -360,6 +364,8 @@ if ($action === 'approve_edit' || $action === 'reject_edit') {
     $log->bind_param('isssss', $eventId, $user_type, $username, $old, $new, $remarks);
     $log->execute();
     $log->close();
+
+    campus_event_enqueue_first_publish_broadcast($conn, $eventId);
 
     echo json_encode(['status' => 'success', 'message' => 'Pending edit approved', 'action' => 'approve_edit']);
     exit();

@@ -36,6 +36,8 @@ $is_pending = ($event['status'] == 'pending');
 $is_hold = ($event['status'] == 'hold');
 $is_past_event = events_row_is_fully_past($event);
 $can_edit_event_roster = has_priv('events');
+$has_featured_col = schema_events_has_is_featured($conn);
+$is_featured = $has_featured_col && (int) ($event['is_featured'] ?? 0) === 1;
 
 $volunteers = $conn->query("
     SELECT v.id as vol_link_id, v.role, v.status as vol_status, v.attended as vol_attended, v.attendance_marked_at as vol_attendance_at,
@@ -240,6 +242,12 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
         }
         .side-actions { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
         .side-actions .btn-action-main { margin-bottom: 0; }
+        .btn-featured { background: #fff; color: #b7791f; border: 2px solid #f6ad55 !important; }
+        .btn-featured.is-on { background: #f6ad55; color: #fff; }
+        .featured-badge {
+            padding: 8px 14px; border-radius: 20px; font-weight: 700; font-size: 0.75rem; text-transform: uppercase;
+            background: rgba(246, 173, 85, 0.15); color: #b7791f; border: 2px solid #f6ad55;
+        }
         .minutes-status {
             font-size: 0.65rem; font-weight: 700; text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
         }
@@ -295,11 +303,16 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
             <a href="dashboard.php" class="text-decoration-none text-muted fw-bold small">
                 <i class="fas fa-chevron-left me-1"></i> Dashboard
             </a>
+            <span class="d-flex align-items-center gap-2">
+            <span id="featuredBadge" class="featured-badge" style="<?php echo $is_featured ? '' : 'display:none;'; ?>">
+                <i class="fas fa-star me-1"></i>Featured
+            </span>
             <span class="status-badge status-<?php echo $event['status']; ?>">
                 <?php 
                     $status_icons = ['pending' => 'hourglass-half', 'hold' => 'pause-circle', 'approved' => 'check-circle', 'rejected' => 'times-circle'];
                     echo '<i class="fas fa-'.$status_icons[$event['status']].' me-1"></i>'.strtoupper($event['status']); 
                 ?>
+            </span>
             </span>
         </div>
 
@@ -786,6 +799,12 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
                     <button type="button" class="btn-action-main w-100" style="background: #6c5ce7; color: white; border: none;" onclick="openAddEditorsModal()">
                         <i class="fas fa-user-plus me-2"></i>ADD FACULTY COORDINATORS
                     </button>
+                    <?php if ($has_featured_col && has_priv('events')): ?>
+                    <button type="button" id="featuredBtn" class="btn-action-main w-100 btn-featured <?php echo $is_featured ? 'is-on' : ''; ?>"
+                            data-featured="<?php echo $is_featured ? '1' : '0'; ?>" onclick="toggleFeatured()">
+                        <i class="<?php echo $is_featured ? 'fas' : 'far'; ?> fa-star me-2"></i><span><?php echo $is_featured ? 'FEATURED — CLICK TO UNFEATURE' : 'MARK AS FEATURED'; ?></span>
+                    </button>
+                    <?php endif; ?>
                     <?php if ($is_past_event && has_priv('certificates')): ?>
                     <a href="certificate_generator.php?<?php echo http_build_query(['event_id' => $id, 'bulk' => 1]); ?>"
                        class="btn-action-main w-100" style="background: #0f766e; color: white; text-decoration: none; display: inline-block; text-align:center;">
@@ -1367,6 +1386,30 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
                     Swal.fire('Error', data.message || 'Failed', 'error');
                 }
             }).catch(err => Swal.fire('Error', err.message || 'Failed', 'error'));
+        }
+
+        function toggleFeatured() {
+            const btn = document.getElementById('featuredBtn');
+            if (!btn) return;
+            const next = btn.getAttribute('data-featured') !== '1';
+            const fd = new FormData();
+            fd.append('event_id', String(getPageEventId()));
+            fd.append('is_featured', next ? '1' : '0');
+            btn.disabled = true;
+            adminFetchJson('event_featured_action' + ADMIN_FETCH_EXT, { method: 'POST', body: fd }).then(data => {
+                if (data.status !== 'success') {
+                    Swal.fire('Error', data.message || 'Failed', 'error');
+                    return;
+                }
+                const on = !!data.is_featured;
+                btn.setAttribute('data-featured', on ? '1' : '0');
+                btn.classList.toggle('is-on', on);
+                btn.querySelector('i').className = (on ? 'fas' : 'far') + ' fa-star me-2';
+                btn.querySelector('span').textContent = on ? 'FEATURED — CLICK TO UNFEATURE' : 'MARK AS FEATURED';
+                document.getElementById('featuredBadge').style.display = on ? '' : 'none';
+                Swal.fire({ toast: true, position: 'top-end', timer: 2000, showConfirmButton: false, icon: 'success', title: data.message });
+            }).catch(err => Swal.fire('Error', err.message || 'Failed', 'error'))
+              .finally(() => { btn.disabled = false; });
         }
 
         function removeEditor(userId, btn) {

@@ -83,6 +83,9 @@ foreach ($jobs as $job) {
             case 'minutes_approved_notify':
                 process_job_minutes_approved_notify($conn, $payload);
                 break;
+            case 'new_event_published':
+                process_job_new_event_published($conn, $payload);
+                break;
             case 'send_staged_meeting_update':
                 process_job_send_staged_meeting_update($conn, $payload);
                 break;
