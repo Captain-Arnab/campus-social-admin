@@ -6,7 +6,7 @@
  *
  * GET  ?action=list_pending&user_id=
  * GET  ?action=list_pending_edits&user_id=
- * POST ?action=approve|reject|hold|reschedule  { user_id, event_id, reason?, reschedule_date?, new_date? }
+ * POST ?action=approve|reject|hold|reschedule|cancel  { user_id, event_id, reason?, reschedule_date?, new_date? }
  * POST ?action=approve_edit|reject_edit       { user_id, event_id }
  *
  * Privilege gate: approve_events (same as desktop approve.php).
@@ -27,6 +27,7 @@ require_once __DIR__ . '/../admin_priv.php';
 require_once __DIR__ . '/../event_delete_helper.php';
 require_once __DIR__ . '/app_inbox_notifications_helper.php';
 require_once __DIR__ . '/background_jobs_helper.php';
+require_once __DIR__ . '/../event_date_range_schema.php';
 
 if (!isset($conn) || !$conn) {
     http_response_code(500);
@@ -201,7 +202,7 @@ if ($eventId <= 0) {
 $username = $actor['username'];
 $user_type = 'subadmin';
 
-if (in_array($action, ['approve', 'reject', 'hold', 'reschedule'], true)) {
+if (in_array($action, ['approve', 'reject', 'hold', 'reschedule', 'cancel'], true)) {
     $current_event = $conn->query("SELECT status, event_date, organizer_id, title FROM events WHERE id=$eventId")->fetch_assoc();
     if (!$current_event) {
         echo json_encode(['status' => 'error', 'message' => 'Event not found']);
@@ -232,6 +233,56 @@ if (in_array($action, ['approve', 'reject', 'hold', 'reschedule'], true)) {
             $conn->rollback();
             echo json_encode(['status' => 'error', 'message' => 'Reject failed']);
         }
+        exit();
+    }
+
+    if ($action === 'cancel') {
+        if ($old_status !== 'approved') {
+            echo json_encode(['status' => 'error', 'message' => 'Cancel is only available after an event is approved']);
+            exit();
+        }
+        $reason = trim((string) ($data['reason'] ?? 'No reason provided'));
+        if ($reason === '') {
+            $reason = 'No reason provided';
+        }
+        if (function_exists('mb_substr')) {
+            $reason = mb_substr($reason, 0, 2000, 'UTF-8');
+        } else {
+            $reason = substr($reason, 0, 2000);
+        }
+        schema_events_ensure_cancelled_status($conn);
+        $featuredSql = schema_events_has_is_featured($conn) ? ', is_featured = 0' : '';
+        $reasonEsc = $conn->real_escape_string($reason);
+        $ok = $conn->query(
+            "UPDATE events SET status = 'cancelled', rejection_reason = '$reasonEsc', hold_reason = NULL, reschedule_date = NULL{$featuredSql} WHERE id = $eventId"
+        );
+        if (!$ok) {
+            echo json_encode(['status' => 'error', 'message' => 'Cancel failed']);
+            exit();
+        }
+        @$conn->query('DELETE FROM event_pending_edits WHERE event_id = ' . (int) $eventId);
+        $remarks = 'Event cancelled after approval (app): ' . $reason;
+        $new = 'cancelled';
+        $log = $conn->prepare(
+            "INSERT INTO event_status_log (event_id, admin_type, admin_username, old_status, new_status, remarks) VALUES (?, ?, ?, ?, ?, ?)"
+        );
+        if ($log) {
+            $log->bind_param('isssss', $eventId, $user_type, $username, $old_status, $new, $remarks);
+            $log->execute();
+            $log->close();
+        }
+        try {
+            campus_inbox_after_status_change($conn, $eventId, 'cancelled', $old_status, $reason);
+        } catch (Throwable $e) {
+            error_log('[admin_events.php] inbox cancel: ' . $e->getMessage());
+        }
+        echo json_encode([
+            'status' => 'success',
+            'message' => 'Event cancelled',
+            'action' => 'cancel',
+            'event_id' => $eventId,
+            'new_status' => 'cancelled',
+        ]);
         exit();
     }
 
@@ -372,4 +423,4 @@ if ($action === 'approve_edit' || $action === 'reject_edit') {
 }
 
 http_response_code(400);
-echo json_encode(['status' => 'error', 'message' => 'Unknown action. Use list_pending, approve, reject, hold, reschedule, approve_edit, reject_edit']);
+echo json_encode(['status' => 'error', 'message' => 'Unknown action. Use list_pending, approve, reject, hold, reschedule, cancel, approve_edit, reject_edit']);

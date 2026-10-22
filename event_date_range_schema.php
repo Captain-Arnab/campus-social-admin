@@ -193,6 +193,37 @@ function schema_events_has_first_published_notified($conn): bool {
 }
 
 /**
+ * Post-approval cancel uses status='cancelled' (distinct from pre-approval reject, which hard-deletes).
+ * Appends the enum value when the column is still an enum without it.
+ */
+function schema_events_ensure_cancelled_status($conn): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    $r = @$conn->query("SHOW COLUMNS FROM events LIKE 'status'");
+    if (!$r || !($row = $r->fetch_assoc())) {
+        return;
+    }
+    $type = (string) ($row['Type'] ?? '');
+    if (stripos($type, 'cancelled') !== false) {
+        return;
+    }
+    if (!preg_match('/^enum\((.*)\)$/i', $type, $m)) {
+        return;
+    }
+    $nullSql = (strtoupper((string) ($row['Null'] ?? '')) === 'YES') ? 'NULL' : 'NOT NULL';
+    $default = $row['Default'] ?? null;
+    $defaultSql = ($default === null || $default === '')
+        ? ''
+        : " DEFAULT '" . $conn->real_escape_string((string) $default) . "'";
+    $newType = "enum(" . $m[1] . ",'cancelled')";
+    @$conn->query("ALTER TABLE `events` MODIFY `status` {$newType} {$nullSql}{$defaultSql}");
+}
+
+/**
  * App/campus wall-clock timezone. Deadlines are stored as naive datetimes in this zone
  * (MySQL DATETIME has no offset). Never use PHP's default php.ini timezone for compares.
  */

@@ -183,6 +183,12 @@ try {
     $organizer_is_student = intval($event_data['organizer_is_student']);
     $event_stmt->close();
 
+    if (($event_data['status'] ?? '') === 'cancelled') {
+        http_response_code(400);
+        echo json_encode(["status" => "error", "message" => "This event has been cancelled"]);
+        exit();
+    }
+
     if (events_row_registration_closed($event_data)) {
         http_response_code(400);
         echo json_encode([

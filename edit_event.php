@@ -4,6 +4,7 @@ include 'db.php';
 require_once __DIR__ . '/admin_priv.php';
 require_once __DIR__ . '/event_date_range_schema.php';
 require_once __DIR__ . '/api/event_payment_helper.php';
+require_once __DIR__ . '/event_banner_admin.php';
 
 if (!isset($_SESSION['admin']) && !isset($_SESSION['subadmin'])) {
     header("Location: index.php");
@@ -32,6 +33,28 @@ if (!$event) {
 }
 
 $errors = [];
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_POST['banner_only'] ?? '') === '1')) {
+    $op = (($_POST['banner_op'] ?? '') === 'remove') ? 'remove' : 'replace';
+    $file = ($op === 'replace') ? ($_FILES['banner'] ?? null) : null;
+    $applied = admin_poster_apply($conn, $id, $op, is_array($file) ? $file : null);
+    if (!$applied['ok']) {
+        header('Location: event_details.php?id=' . $id . '&poster_error=' . urlencode((string) ($applied['error'] ?? 'Could not update poster')));
+        exit();
+    }
+    $old_status = (string) $event['status'];
+    $remarks = ($op === 'remove')
+        ? 'Poster removed by ' . $user_type . ' (' . $username . ')'
+        : 'Poster replaced by ' . $user_type . ' (' . $username . ')';
+    $log_stmt = $conn->prepare("INSERT INTO event_status_log (event_id, admin_type, admin_username, old_status, new_status, remarks) VALUES (?, ?, ?, ?, ?, ?)");
+    if ($log_stmt) {
+        $log_stmt->bind_param('isssss', $id, $user_type, $username, $old_status, $old_status, $remarks);
+        $log_stmt->execute();
+        $log_stmt->close();
+    }
+    header('Location: event_details.php?id=' . $id . '&msg=poster_updated');
+    exit();
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $title = trim($_POST['title'] ?? '');
@@ -106,6 +129,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = "End date/time must be on or after the start";
     }
 
+    $poster_op = null;
+    if (!empty($_FILES['banner']['name'])) {
+        $poster_op = 'replace';
+        $uploadErr = (int) ($_FILES['banner']['error'] ?? UPLOAD_ERR_NO_FILE);
+        $tmp = (string) ($_FILES['banner']['tmp_name'] ?? '');
+        $size = (int) ($_FILES['banner']['size'] ?? 0);
+        if ($uploadErr !== UPLOAD_ERR_OK || $tmp === '' || !admin_poster_limits_ok($tmp, $size)) {
+            $errors[] = admin_poster_limit_message();
+        }
+    } elseif (!empty($_POST['remove_banner'])) {
+        $poster_op = 'remove';
+    }
+
     if (empty($errors)) {
         $old_status = $event['status'];
 
@@ -148,8 +184,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Clear any pending edit from organizer/editor when admin edits directly
             @$conn->query("DELETE FROM event_pending_edits WHERE event_id = $id");
 
+            if ($poster_op !== null) {
+                $applied = admin_poster_apply($conn, $id, $poster_op, $poster_op === 'replace' ? $_FILES['banner'] : null);
+                if (!$applied['ok']) {
+                    header('Location: event_details.php?id=' . $id . '&poster_error=' . urlencode((string) ($applied['error'] ?? 'Could not update poster')));
+                    exit();
+                }
+            }
+
             // Log the update (status stays the same)
             $remarks = "Event details updated by " . $user_type . " (" . $username . ")";
+            if ($poster_op === 'replace') {
+                $remarks .= '; poster replaced';
+            } elseif ($poster_op === 'remove') {
+                $remarks .= '; poster removed';
+            }
             $log_stmt = $conn->prepare("INSERT INTO event_status_log (event_id, admin_type, admin_username, old_status, new_status, remarks) VALUES (?, ?, ?, ?, ?, ?)");
             $log_stmt->bind_param("isssss", $id, $user_type, $username, $old_status, $old_status, $remarks);
             $log_stmt->execute();
@@ -259,6 +308,7 @@ $banners = json_decode($event['banners'] ?? '[]');
                             <div class="text-muted"><i class="fas fa-image me-2"></i>No banner</div>
                         <?php endif; ?>
                     </div>
+                    <form class="d-none"></form>
                 </div>
 
                 <?php if (!empty($errors)): ?>
@@ -272,7 +322,7 @@ $banners = json_decode($event['banners'] ?? '[]');
                     </div>
                 <?php endif; ?>
 
-                <form method="POST" class="mt-3">
+                <form method="POST" enctype="multipart/form-data" class="mt-3">
                     <div class="row g-3">
                         <div class="col-md-6">
                             <label class="form-label fw-bold small">Title</label>
@@ -334,6 +384,17 @@ $banners = json_decode($event['banners'] ?? '[]');
                             </div>
                         </div>
                         <?php endif; ?>
+                        <div class="col-12">
+                            <label class="form-label fw-bold small">Poster</label>
+                            <input type="file" name="banner" accept="image/jpeg,image/png,image/gif,image/webp" class="form-control">
+                            <div class="form-text">Replace the current poster. ≤5MB and ≤1080×1920 px. Applies immediately, including after approval.</div>
+                            <?php if (!empty($banners) && is_array($banners)): ?>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" name="remove_banner" value="1" id="removeBanner">
+                                <label class="form-check-label" for="removeBanner">Remove current poster</label>
+                            </div>
+                            <?php endif; ?>
+                        </div>
                         <div class="col-12">
                             <label class="form-label fw-bold small">Description</label>
                             <textarea name="description" class="form-control" rows="5"><?php echo htmlspecialchars($_POST['description'] ?? $event['description']); ?></textarea>

@@ -104,13 +104,16 @@ function events_page_date_condition(mysqli $conn, string $view): string
         return "AND e.status = 'pending'";
     }
     if ($view === 'past') {
-        return 'AND ' . events_sql_past($conn, 'e') . ' AND COALESCE(e.event_end_date, e.event_date) >= DATE_SUB(NOW(), INTERVAL 30 DAY)';
+        return 'AND ' . events_sql_past($conn, 'e') . ' AND COALESCE(e.event_end_date, e.event_date) >= DATE_SUB(NOW(), INTERVAL 30 DAY) AND e.status <> \'cancelled\'';
     }
     if ($view === 'archive') {
-        return 'AND ' . events_sql_past($conn, 'e') . ' AND COALESCE(e.event_end_date, e.event_date) < DATE_SUB(NOW(), INTERVAL 30 DAY)';
+        return 'AND ' . events_sql_past($conn, 'e') . ' AND COALESCE(e.event_end_date, e.event_date) < DATE_SUB(NOW(), INTERVAL 30 DAY) AND e.status <> \'cancelled\'';
     }
     if ($view === 'hold') {
         return "AND e.status = 'hold'";
+    }
+    if ($view === 'cancelled') {
+        return "AND e.status = 'cancelled'";
     }
     return 'AND ' . events_sql_not_past($conn, 'e') . " AND e.status = 'approved'";
 }
@@ -461,6 +464,7 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
             'pending' => 'Pending review',
             'live' => 'Live / Upcoming',
             'hold' => 'On hold',
+            'cancelled' => 'Cancelled',
             'past' => 'Past events',
             'archive' => 'Archived (>30 days)',
         ];
@@ -487,6 +491,9 @@ $categories = $conn->query("SELECT DISTINCT category FROM events ORDER BY catego
             </a>
             <a href="events.php?view=hold" class="events-view-tab text-decoration-none <?php echo ($view == 'hold') ? 'active' : ''; ?>" style="<?php echo ($view == 'hold') ? 'border-bottom:3px solid #f39c12;color:#2d3436;' : ''; ?>">
                 <i class="fas fa-pause-circle me-1"></i>On Hold
+            </a>
+            <a href="events.php?view=cancelled" class="events-view-tab text-decoration-none <?php echo ($view == 'cancelled') ? 'active' : ''; ?>" style="<?php echo ($view == 'cancelled') ? 'border-bottom:3px solid #991b1b;color:#2d3436;' : ''; ?>">
+                <i class="fas fa-ban me-1"></i>Cancelled
             </a>
             <a href="events.php?view=past" class="events-view-tab text-decoration-none <?php echo ($view == 'past') ? 'active' : ''; ?>" style="<?php echo ($view == 'past') ? 'border-bottom:3px solid #3498db;color:#2d3436;' : ''; ?>">
                 <i class="fas fa-history me-1"></i>Past Events

@@ -225,6 +225,7 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
         .status-pending { background: rgba(255, 193, 7, 0.1); color: #ffc107; border: 2px solid #ffc107; }
         .status-approved { background: rgba(46, 204, 113, 0.1); color: #2ecc71; border: 2px solid #2ecc71; }
         .status-rejected { background: rgba(231, 76, 60, 0.1); color: #e74c3c; border: 2px solid #e74c3c; }
+        .status-cancelled { background: rgba(127, 29, 29, 0.08); color: #991b1b; border: 2px solid #991b1b; }
 
         .nav-tabs { border-bottom: 1px solid var(--line); }
         .nav-tabs .nav-link {
@@ -299,6 +300,18 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
 <body>
 
     <div class="container-compact">
+        <?php if (($_GET['msg'] ?? '') === 'cancelled'): ?>
+        <div class="alert alert-success">Event cancelled. It remains in the system with status Cancelled, separate from a pre-approval rejection.</div>
+        <?php elseif (($_GET['msg'] ?? '') === 'cancel_denied'): ?>
+        <div class="alert alert-warning">Cancel is only available after an event is approved.</div>
+        <?php elseif (($_GET['msg'] ?? '') === 'poster_updated'): ?>
+        <div class="alert alert-success">Poster updated on this event.</div>
+        <?php elseif (($_GET['msg'] ?? '') === 'error'): ?>
+        <div class="alert alert-danger">That action could not be completed.</div>
+        <?php endif; ?>
+        <?php if (!empty($_GET['poster_error'])): ?>
+        <div class="alert alert-danger"><?php echo htmlspecialchars((string) $_GET['poster_error']); ?></div>
+        <?php endif; ?>
         <div class="mb-3 d-flex justify-content-between align-items-center">
             <a href="dashboard.php" class="text-decoration-none text-muted fw-bold small">
                 <i class="fas fa-chevron-left me-1"></i> Dashboard
@@ -309,8 +322,9 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
             </span>
             <span class="status-badge status-<?php echo $event['status']; ?>">
                 <?php 
-                    $status_icons = ['pending' => 'hourglass-half', 'hold' => 'pause-circle', 'approved' => 'check-circle', 'rejected' => 'times-circle'];
-                    echo '<i class="fas fa-'.$status_icons[$event['status']].' me-1"></i>'.strtoupper($event['status']); 
+                    $status_icons = ['pending' => 'hourglass-half', 'hold' => 'pause-circle', 'approved' => 'check-circle', 'rejected' => 'times-circle', 'cancelled' => 'ban', 'closed' => 'lock'];
+                    $status_icon = $status_icons[$event['status']] ?? 'circle';
+                    echo '<i class="fas fa-'.$status_icon.' me-1"></i>'.strtoupper($event['status']); 
                 ?>
             </span>
             </span>
@@ -342,6 +356,20 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
                                 <p class="hero-sub"><i class="fas fa-user-tie me-1"></i><?php echo htmlspecialchars((string) $event['organizer_name']); ?></p>
                             </div>
                         </div>
+                        <?php if (has_priv('events')): ?>
+                        <form method="post" action="edit_event.php?id=<?php echo (int) $id; ?>" enctype="multipart/form-data" class="mb-3">
+                            <input type="hidden" name="banner_only" value="1">
+                            <label class="form-label small fw-bold mb-1">Poster</label>
+                            <input type="file" name="banner" accept="image/jpeg,image/png,image/gif,image/webp" class="form-control form-control-sm mb-2">
+                            <div class="d-flex flex-wrap gap-2">
+                                <button type="submit" name="banner_op" value="replace" class="btn btn-sm btn-dark">Replace poster</button>
+                                <?php if ($banner_file !== ''): ?>
+                                <button type="submit" name="banner_op" value="remove" class="btn btn-sm btn-outline-danger" onclick="return confirm('Remove this poster?');">Remove poster</button>
+                                <?php endif; ?>
+                            </div>
+                            <div class="form-text">≤5MB and ≤1080×1920 px. Saved immediately, including after approval.</div>
+                        </form>
+                        <?php endif; ?>
 
                         <div class="meta-grid">
                             <div class="meta-item">
@@ -403,6 +431,14 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
                                 <div class="label">Rejection Reason</div>
                                 <div class="alert alert-danger mb-0 py-2">
                                     <i class="fas fa-times-circle me-2"></i><?php echo htmlspecialchars($event['rejection_reason']); ?>
+                                </div>
+                            </div>
+                            <?php endif; ?>
+                            <?php if (($event['status'] ?? '') === 'cancelled' && !empty($event['rejection_reason'])): ?>
+                            <div class="meta-item" style="grid-column: 1 / -1;">
+                                <div class="label">Cancellation reason</div>
+                                <div class="alert alert-danger mb-0 py-2">
+                                    <i class="fas fa-ban me-2"></i><?php echo htmlspecialchars($event['rejection_reason']); ?>
                                 </div>
                             </div>
                             <?php endif; ?>
@@ -895,8 +931,12 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
                             <i class="fas fa-calendar-check me-2"></i>RESCHEDULE EVENT
                         </button>
 
+                        <button onclick="showCancelModal()" class="btn btn-action-main btn-link text-danger text-decoration-none">
+                            <i class="fas fa-ban me-2"></i>CANCEL EVENT
+                        </button>
+
                     <?php elseif($event['status'] == 'approved'): ?>
-                        <p class="text-muted small mb-0">You do not have permission to hold or reschedule from this role.</p>
+                        <p class="text-muted small mb-0">You do not have permission to hold, reschedule, or cancel from this role.</p>
                         
                     <?php else: ?>
                         <div class="text-center py-4">
@@ -1242,6 +1282,36 @@ $event_rules = trim((string) ($event['rules'] ?? ''));
                 cancelButtonColor: '#95a5a6'
             }).then((res) => {
                 if (res.isConfirmed) window.location.href = `approve_event_edit.php?id=<?php echo $id; ?>&action=${action}`;
+            });
+        }
+
+        function showCancelModal() {
+            Swal.fire({
+                title: 'Cancel Event',
+                html: `
+                    <div class="text-start">
+                        <p class="small text-muted mb-2">This keeps the event on record with status Cancelled. It is not deleted the way a pre-approval rejection is.</p>
+                        <label class="form-label small fw-bold">Cancellation reason <span class="text-danger">*</span></label>
+                        <textarea id="cancelReason" class="form-control" rows="4" maxlength="2000" placeholder="Explain why this approved event is being cancelled..."></textarea>
+                    </div>
+                `,
+                showCancelButton: true,
+                confirmButtonText: 'Cancel Event',
+                confirmButtonColor: '#e74c3c',
+                cancelButtonColor: '#95a5a6',
+                preConfirm: () => {
+                    const reason = (document.getElementById('cancelReason').value || '').trim();
+                    if (!reason) {
+                        Swal.showValidationMessage('Please provide a cancellation reason');
+                        return false;
+                    }
+                    return { reason };
+                }
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    const data = result.value;
+                    window.location.href = `approve.php?id=<?php echo $id; ?>&action=cancel&reason=${encodeURIComponent(data.reason)}`;
+                }
             });
         }
 

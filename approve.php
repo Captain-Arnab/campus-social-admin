@@ -7,6 +7,7 @@ if (file_exists(__DIR__ . '/api/fcm_helper.php')) {
 }
 require_once __DIR__ . '/api/app_inbox_notifications_helper.php';
 require_once __DIR__ . '/event_delete_helper.php';
+require_once __DIR__ . '/event_date_range_schema.php';
 
 if ((!isset($_SESSION['admin']) && !isset($_SESSION['subadmin']))) {
     header("Location: index.php");
@@ -71,6 +72,21 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
             $reschedule_reason = isset($_GET['reason']) ? $_GET['reason'] : 'No reason provided';
             $remarks = 'Event rescheduled: ' . $reschedule_reason . ' (From ' . date('M d, Y', strtotime($current_event['event_date'])) . ' to ' . date('M d, Y', strtotime($new_event_date)) . ')';
             break;
+
+        case 'cancel':
+            // After approval: keep the row as status=cancelled (not the pre-approval hard delete).
+            $new_status = 'cancelled';
+            $rejection_reason = isset($_GET['reason']) ? trim((string) $_GET['reason']) : '';
+            if ($rejection_reason === '') {
+                $rejection_reason = 'No reason provided';
+            }
+            if (function_exists('mb_substr')) {
+                $rejection_reason = mb_substr($rejection_reason, 0, 2000, 'UTF-8');
+            } else {
+                $rejection_reason = substr($rejection_reason, 0, 2000);
+            }
+            $remarks = 'Event cancelled after approval: ' . $rejection_reason;
+            break;
     }
 
     // Reject = notify organizer, then permanently remove this event from the system
@@ -93,6 +109,43 @@ if (isset($_GET['id']) && isset($_GET['action'])) {
             error_log('[approve.php] reject delete: ' . $e->getMessage());
             header("Location: dashboard.php?msg=error");
         }
+        exit();
+    }
+
+    // Cancel keeps the event (registrations, payments, certificates) and marks it cancelled.
+    if ($action === 'cancel') {
+        if ($old_status !== 'approved') {
+            header("Location: event_details.php?id=$id&msg=cancel_denied");
+            exit();
+        }
+        schema_events_ensure_cancelled_status($conn);
+        $featuredSql = schema_events_has_is_featured($conn) ? ', is_featured = 0' : '';
+        $stmt = $conn->prepare("UPDATE events SET status = 'cancelled', rejection_reason = ?, hold_reason = NULL, reschedule_date = NULL{$featuredSql} WHERE id = ?");
+        if (!$stmt) {
+            header("Location: event_details.php?id=$id&msg=error");
+            exit();
+        }
+        $stmt->bind_param('si', $rejection_reason, $id);
+        $saved = $stmt->execute();
+        $stmt->close();
+        if (!$saved) {
+            header("Location: event_details.php?id=$id&msg=error");
+            exit();
+        }
+        @$conn->query('DELETE FROM event_pending_edits WHERE event_id = ' . (int) $id);
+        $log_stmt = $conn->prepare("INSERT INTO event_status_log (event_id, admin_type, admin_username, old_status, new_status, remarks) VALUES (?, ?, ?, ?, ?, ?)");
+        if ($log_stmt) {
+            $cancelled = 'cancelled';
+            $log_stmt->bind_param('isssss', $id, $user_type, $username, $old_status, $cancelled, $remarks);
+            $log_stmt->execute();
+            $log_stmt->close();
+        }
+        try {
+            campus_inbox_after_status_change($conn, $id, 'cancelled', $old_status, (string) $rejection_reason);
+        } catch (Throwable $e) {
+            error_log('[approve.php] campus_inbox_after_status_change cancel: ' . $e->getMessage());
+        }
+        header("Location: event_details.php?id=$id&msg=cancelled");
         exit();
     }
 

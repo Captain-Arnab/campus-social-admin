@@ -531,6 +531,14 @@ function campus_inbox_after_status_change($conn, $event_id, $new_status, $old_st
             $body       = "Your event \"{$event_title}\" has been put on hold by the admin.";
             if ($admin_note !== '') $body .= " Note: {$admin_note}";
             break;
+        case 'cancelled':
+            $notif_type = 'event_cancelled';
+            $title      = 'Event Cancelled';
+            $body       = "Your event \"{$event_title}\" has been cancelled by the admin.";
+            if ($admin_note !== '') {
+                $body .= " Reason: {$admin_note}";
+            }
+            break;
         case 'rescheduled':
             $notif_type = 'event_rescheduled';
             $title      = 'Event Rescheduled';
@@ -553,6 +561,9 @@ function campus_inbox_after_status_change($conn, $event_id, $new_status, $old_st
         $data_payload['admin_note'] = $admin_note;
         if (strtolower((string) $new_status) === 'rejected') {
             $data_payload['rejection_reason'] = $admin_note;
+        }
+        if (strtolower((string) $new_status) === 'cancelled') {
+            $data_payload['cancellation_reason'] = $admin_note;
         }
     }
     $data_json = json_encode($data_payload);

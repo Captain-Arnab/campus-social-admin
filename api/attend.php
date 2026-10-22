@@ -223,6 +223,12 @@ try {
     $event_row = $event_result->fetch_assoc();
     $event_check->close();
 
+    if (($event_row['status'] ?? '') === 'cancelled') {
+        http_response_code(400);
+        echo json_encode(["status" => "error", "message" => "This event has been cancelled"]);
+        exit();
+    }
+
     if (events_row_registration_closed($event_row)) {
         http_response_code(400);
         echo json_encode([
